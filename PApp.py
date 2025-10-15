@@ -3,6 +3,7 @@
 # version : 5.0.0
 # ===============================
 # python PApp.py --ea 10 --tp 4.0 --sl 2.0 --poll 1 --timeout 30
+# 이름 바꿀까?
 
 from __future__ import annotations
 import os
