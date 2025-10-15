@@ -280,10 +280,43 @@ class KiwoomClient:
             
             if(int_rflu > (tp*100)): #부호가 제거된 등락률이 상한 포로핏보다 크면 저장하기
                 ret_val.append((self.rcode, self.rname, self.rprice, self.rflu))
-
-            #print(f"여긴가? {self.rcode} / {self.rname} / {self.rprice} / {self.rflu}")
+        
+            print(f"get_stoke_code? {self.rcode} / {self.rname} / {self.rprice} / {self.rflu}")
 
         return ret_val    
+    
+    # 국내주식 > 순위정보 > 전일대비등락률상위요청(ka10027)
+    def get_stoke_code_yesterday(self, tp) -> list[tuple[str, str, str, str]]:
+
+        body = {
+                "mrkt_tp": "000", 		#	시장구분	String	Y	3	000:전체, 001:코스피, 101:코스닥
+                "sort_tp": "2", 		#	정렬구분	String	Y	1	1:상승률, 2:상승폭, 3:하락률, 4:하락폭, 5:보합
+                "trde_qty_cnd": "0000", #	거래량조건	String	Y	5	0000:전체조회, 0010:만주이상, 0050:5만주이상, 0100:10만주이상, 0150:15만주이상, 0200:20만주이상, 0300:30만주이상, 0500:50만주이상, 1000:백만주이상
+                "stk_cnd": "16", 		#	종목조건	String	Y	2	0:전체조회, 1:관리종목제외, 4:우선주+관리주제외, 3:우선주제외, 5:증100제외, 6:증100만보기, 7:증40만보기, 8:증30만보기, 9:증20만보기, 11:정리매매종목제외, 12:증50만보기, 13:증60만보기, 14:ETF제외, 15:스펙제외, 16:ETF+ETN제외
+                "crd_cnd": "0", 		#	신용조건	String	Y	1	0:전체조회, 1:신용융자A군, 2:신용융자B군, 3:신용융자C군, 4:신용융자D군, 7:신용융자E군, 9:신용융자전체
+                "updown_incls": "0", 	#	상하한포함	String	Y	2	0:불 포함, 1:포함
+                "pric_cnd": "0", 		#	가격조건	String	Y	2	0:전체조회, 1:1천원미만, 2:1천원~2천원, 3:2천원~5천원, 4:5천원~1만원, 5:1만원이상, 8:1천원이상, 10: 1만원미만
+                "trde_prica_cnd": "0", 	#	거래대금조건	String	Y	4	0:전체조회, 3:3천만원이상, 5:5천만원이상, 10:1억원이상, 30:3억원이상, 50:5억원이상, 100:10억원이상, 300:30억원이상, 500:50억원이상, 1000:100억원이상, 3000:300억원이상, 5000:500억원이상
+                "stex_tp": "1", 		#	거래소구분	String	Y	1	1:KRX, 2:NXT 3.통합
+            }
+        data = self._post("/api/dostk/rkinfo", api_id="ka10027", body=body)
+
+        ret_val: list[tuple[str,str,str,str]] = []
+        
+        items = data.get("pred_pre_flu_rt_upper") or []
+        for row in items:
+            self.rcode = (row.get("stk_cd") or "").replace("_AL", "") 
+            self.rname = row.get("stk_nm")
+            self.rprice  = row.get("cur_prc")
+            self.rflu  = row.get("flu_rt") #등락률
+            int_rflu  = _to_abs_int(row.get("flu_rt"))   # 부호 제거
+            
+            if(int_rflu > (tp*100)): #부호가 제거된 등락률이 상한 포로핏보다 크면 저장하기
+                ret_val.append((self.rcode, self.rname, self.rprice, self.rflu))
+
+            print(f"get_stoke_code_yesterday? {self.rcode} / {self.rname} / {self.rprice} / {self.rflu}")
+
+        return ret_val  
 
     #oto 파일에서 이쪽으로 합쳤음. - 실제 행동하는 함수
     def place_limit_buy_then_oto_takeprofit(
@@ -413,7 +446,7 @@ class KiwoomClient:
         buy_ord_no: str, 
         stk_cd: str, 
         qty: int = 0,        
-        ) -> str:
+        ) -> dict:
         
         #def place_sell_market(self, stk_cd: str, qty: int) -> str:
         # 1) 모두 팔아! 매도 주문 접수
@@ -421,11 +454,11 @@ class KiwoomClient:
         time.sleep(1)
         tprint(f"place_sell_order_cancel = {ret_no}")
 
-        # 1) 모두 팔아! 매도 주문 접수
+        # 1) 나의 계좌를 보자
         balance_info = self.get_my_all_stock()
         time.sleep(1)
         tprint(balance_info)
-        print(f"보유 종목 수는 {len(balance_info)} 입니다.")
+        stock_cnt = len(balance_info)
 
         t_qty = 0
         sell_no = None
@@ -443,7 +476,8 @@ class KiwoomClient:
         #여기서 채결 확인을 할지 걍 넘어갈지...일단은 걍 넘어가 보자
         
         return {                    
-            "sell_ord_no": sell_no,                
+            "stock_cnt": stock_cnt,
+            "sell_ord_no": sell_no,
         }
     
 #==============================================================
@@ -707,7 +741,7 @@ class KiwoomClient:
             is_gap_up = open_pric > pred_close_pric
             if is_gap_up and open_pric >= resistance_price * 0.995: # 0.5% 이내 근접하여 돌파했다고 판단
                 # 단타 매매 원칙: 갭 상승으로 이미 저항을 돌파한 종목은 매수하지 않는다
-                clear_prev_lines(1) # 겹쳐 쓰기 1줄 위로
+                #clear_prev_lines(1) # 겹쳐 쓰기 1줄 위로
                 print(f"제외: [{stk_nm}] 갭 상승 및 저항 돌파 (시가: {open_pric:,.0f}, 저항: {resistance_price:,.0f})")
                 continue 
 

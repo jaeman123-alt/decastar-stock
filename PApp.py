@@ -2,9 +2,8 @@
 # file: PApp.py
 # version : 5.0.0
 # ===============================
-# python PApp.py --ea 10 --tp 4.0 --sl 2.0 --poll 1 --timeout 30
-# 이름 바꿀까?
-# 니 꼴리는대로 해라. 
+# python PApp.py
+# 밑에 상수를 고쳐서 사용하시요.
 
 from __future__ import annotations
 import os
@@ -20,20 +19,32 @@ from auth import KiwoomAuth #요건 인증
 from kiwoom_client import KiwoomClient #요건 관련 함수
 from tools import * #요건 공통 함수
 
-b_Tprint: bool = False # 요건 tprint 도 출력되도록 설정
-b_Test: bool = False # 요건 TEST 모드 장마감 후 에도 진행 test 설정
-
-b_JMMode: bool = False #True # 오건 매매 없이 JM 을 위해 종목선정까지만 동작하도록
-b_MeMe: bool = True #False #True # 오건 매매 대상을 표시 해줌
-
-int_resol_code: int = 5 #예비로 더 읽어 올 종목수
-
-lim_price: int = 150000 # 비싼 건 넘기자고 
 start_time: str = "09:11"
+
 #전체 잔고 매도 주문 시도 시간
 sell_all_time1: str = "11:00"
 sell_all_time2: str = "14:00"
 sell_all_time3: str = "15:20"
+
+lim_price: int = 150000 # 비싼 건 넘기자고 
+
+int_ea: int = 10            #    ap.add_argument("--ea", type=int, required=True, help="대상 종목수 (잔액 자동 사용)")
+float_tp: float = 4.0       #    ap.add_argument("--tp", type=float, required=True, help="익절 % (매수가 대비)")
+float_sl: float = 2.0       #    ap.add_argument("--sl", type=float, required=True, help="손절 % (매수가 대비)")    
+float_poll: float = 1       #    ap.add_argument("--poll", type=float, default=1.0, help="체결 폴링 간격(초)")
+float_timeout: float = 30   #    ap.add_argument("--timeout", type=int, default=30, help="매수 체결 대기 타임아웃(초)")        
+bool_check: bool = False     #    ap.add_argument("--check", action="store_true", help="있으면 대상 종목확인 / 없으면 실행")
+
+b_Tprint: bool = False # 요건 tprint 도 출력되도록 설정
+b_Test: bool = False # 요건 TEST 모드 장마감 후 에도 진행 test 설정
+
+b_JMKEY: bool = False #True # JM 계좌 사용
+b_JMMode: bool = False #True # 매매 없이 JM 을 위해 종목선정까지만 동작하도록
+
+b_MeMe: bool = True #False #True # 매매 대상을 표시 해줌
+
+int_resol_code: int = 5 #예비로 더 읽어 올 종목수
+int_pick_code: int = 2 #1:JM 2:CY1 3:CY2
 
 #예약 기다리는 함수
 def wait_until(hhmm: str) -> None:
@@ -83,51 +94,62 @@ def main():
     set_test_mode(b_Tprint)  # <- b_Test tprint 사용할건가
     print(f"TEST Mode - {b_Test} - [MAIN] 시작합니다.") # b_Test = True 에만 출력됨
 
-    ap = argparse.ArgumentParser(description="Kiwoom REST — DecaStar 실행기")
-    ap.add_argument("--ea", type=int, required=True, help="대상 종목수 (잔액 자동 사용)")
-    ap.add_argument("--tp", type=float, required=True, help="익절 % (매수가 대비)")
-    ap.add_argument("--sl", type=float, required=True, help="손절 % (매수가 대비)")    
-    ap.add_argument("--poll", type=float, default=1.0, help="체결 폴링 간격(초)")
-    ap.add_argument("--timeout", type=int, default=30, help="매수 체결 대기 타임아웃(초)")        
-    ap.add_argument("--check", action="store_true", help="있으면 대상 종목확인 / 없으면 실행")
-    args = ap.parse_args()
+#    ap = argparse.ArgumentParser(description="Kiwoom REST — DecaStar 실행기")
+#    ap.add_argument("--ea", type=int, required=True, help="대상 종목수 (잔액 자동 사용)")
+#    ap.add_argument("--tp", type=float, required=True, help="익절 % (매수가 대비)")
+#    ap.add_argument("--sl", type=float, required=True, help="손절 % (매수가 대비)")    
+#    ap.add_argument("--poll", type=float, default=1.0, help="체결 폴링 간격(초)")
+#    ap.add_argument("--timeout", type=int, default=30, help="매수 체결 대기 타임아웃(초)")        
+#    ap.add_argument("--check", action="store_true", help="있으면 대상 종목확인 / 없으면 실행")
+#    args = ap.parse_args()
 
     # 구성 읽기 (환경변수에서 키/계좌)
-    #81126449 25-10-10~26-01-08 김창연 1000만원
     BaseURL = os.getenv("KIWOOM_URL", "https://mockapi.kiwoom.com")
-    app_key = os.getenv("KIWOOM_APP_KEY", "NTxi_Z9RZJ69MpW79ALrHKB6aUHp1O51gD1Oz3HCZfk")
-    app_secret = os.getenv("KIWOOM_APP_SECRET", "G0XgpAdbuW5CxmemgCb_OC_FrKEG2fBLnsj3kKQsRs8")
-
-    # jake.lee #만료일 2026-01-10
-    #app_key = os.getenv("KIWOOM_APPKEY", "akK1r91hQ51_NfENx7BCfIk4YVyDG1NTqIEXgdi5mII")
-    #app_secret = os.getenv("KIWOOM_SECRETKEY", "Lu9byXdkRDG7lo5VitPpP83T9NaoSR_X0XLspqIMW5s")
-    #print("account : jm.lee...")
-
+    
+    if(b_JMKEY == True): 
+        app_key = os.getenv("KIWOOM_APPKEY", "akK1r91hQ51_NfENx7BCfIk4YVyDG1NTqIEXgdi5mII")
+        app_secret = os.getenv("KIWOOM_SECRETKEY", "Lu9byXdkRDG7lo5VitPpP83T9NaoSR_X0XLspqIMW5s")
+        print("account : jm.lee...# jake.lee #만료일 2026-01-10")
+    else:        
+        app_key = os.getenv("KIWOOM_APP_KEY", "NTxi_Z9RZJ69MpW79ALrHKB6aUHp1O51gD1Oz3HCZfk")
+        app_secret = os.getenv("KIWOOM_APP_SECRET", "G0XgpAdbuW5CxmemgCb_OC_FrKEG2fBLnsj3kKQsRs8")
+        print("account : cyKim...#81126449 25-10-10 ~ 26-01-08 김창연 1000만원 #")
         
     auth = KiwoomAuth(app_key, app_secret, BaseURL)    
+    time.sleep(1)    
     client = KiwoomClient(access_token=auth._access_token, is_paper=True) #is_paper 실전에서는 False로 변경 할 것
-
-    #cur_entr = api.get_current_entr(auth._access_token)  
-    cur_entr = client.get_current_entr()  
-
-    target_ea = args.ea
-    target_entr = math.floor(cur_entr/target_ea)
-    print(f"1. 니 계좌에서 구매 가능한 돈 : {format(cur_entr, ',')}원 / 해야 할 종목 수 {target_ea} 개")   
-    print(f"2. 1개 종목당 {format(target_entr,',')} 원 실행 예정") 
+    time.sleep(1)
 
     #예약시간기다리기    
     if(b_Test): 
         print(f"[TEST MODE]장시작 예약시간 {start_time} PASS")   
+        float_timeout = 1
+        int_ea = 3        
     else:
         wait_until(start_time)
 
-    #시도 할 code 가져오기 
-    #251013@JM
-    #251013 1. 1차 검색에서 종목수가 최대수량의 5배가 넘으면 검색 멈춤. 적으면 거래량 낮춰 재검색 하도록 적용
-    #251012 1. ETF + ETN 제외, 거래대금 100억 이상, 거래량 20만주 이상
-    #251013 2. 체결강도 120 이상
-    #251013 3. 시가, 전일 종가, 60일 신고가 기준으로 갭 상승 돌파 제외
-    rows = client.get_stocks_code(args.ea + int_resol_code) # 요청 보다 int_resol_code개 더 뽑아 옴
+    cur_entr = client.get_current_entr()  
+
+    target_ea = int_ea
+    target_entr = math.floor(cur_entr/target_ea)
+    print(f"1. 니 계좌에서 구매 가능한 돈 : {format(cur_entr, ',')}원 / 해야 할 종목 수 {target_ea} 개")   
+    print(f"2. 1개 종목당 {format(target_entr,',')} 원 실행 예정") 
+    print(f"3. 뽑아오는 방법 -> {int_pick_code} 번 (# 1:JM 2:CY1 3:CY2) 실행!") 
+
+    match (int_pick_code):
+        case 1:
+            #시도 할 code 가져오기 
+            #251013@JM
+            #251013 1. 1차 검색에서 종목수가 최대수량의 5배가 넘으면 검색 멈춤. 적으면 거래량 낮춰 재검색 하도록 적용
+            #251012 1. ETF + ETN 제외, 거래대금 100억 이상, 거래량 20만주 이상
+            #251013 2. 체결강도 120 이상
+            #251013 3. 시가, 전일 종가, 60일 신고가 기준으로 갭 상승 돌파 제외
+            rows = client.get_stocks_code(int_ea + int_resol_code) # 요청 보다 int_resol_code개 더 뽑아 옴     
+        case 2:
+            rows = client.get_stoke_code(float_tp) # 요청 보다 등락율이 익절 값보다 커야 뽑아 옴
+        case 3:
+            rows = client.get_stoke_code_yesterday(float_tp) # 요청 보다 등락율이 익절 값보다 커야 뽑아 옴
+            
     if(b_JMMode == True):
         return
 
@@ -147,22 +169,19 @@ def main():
             go_or_stop.append(1)
             time.sleep(1)
 
-        print(f"go_or_stop - {len(go_or_stop)}")
-
         store_code = stk_cd
 
         # 1) 종목코드 현재가 확인        
-        now_price = client.get_last_price(store_code)
-        old_price.append(now_price)
+        now_price = client.get_last_price(store_code)        
         
         # 2) 구매 가능 수량 
         qty = int(target_entr // now_price)
         if qty < 1:
-            print(f"사용금액 {format(target_entr,',')}원 으로 구매 가능 수량이 0이여. 이 종목의 매수는 못혀. (현재가 {format(now_price,',')})")
+            print(f"[대상 종목 {loop_su}. : {stk_nm}] 현재가 {format(now_price,',')} / 구매가능수량 0 이 종목의 매수는 못혀.")
             loop_su = loop_su -1
             continue
         elif now_price > lim_price: #10만원 넘는건 PASS혀
-            print(f"가격 리미트가 {format(lim_price,',')}원 임으로  이 종목의 매수는 못혀. (현재가 {format(now_price,',')})")
+            print(f"[대상 종목 {loop_su}. : {stk_nm}] 현재가 {format(now_price,',')} / 가격 리미트가 {format(lim_price,',')}원 임으로  이 종목의 매수는 못혀")            
             loop_su = loop_su -1
             continue
         
@@ -173,14 +192,20 @@ def main():
             stk_cd=store_code,            
             buy_price=now_price, 
             qty=qty,
-            take_profit_add=args.tp,
-            poll_sec=args.poll,
-            timeout_sec=args.timeout,
+            take_profit_add=float_tp,
+            poll_sec=float_poll,
+            timeout_sec=float_timeout,
         )
 
         if(result['buy_ord_no'] != "지정가 매수실패" or b_Test == True):            
-            print(f" No{loop_su}.종목 [{store_code}] : [{stk_nm}] / 채결가 {result['buy_avg_price']:,} 익절예약가 {result['sell_price']:,}")
-            target_rows.append((store_code, stk_nm, result['buy_avg_price'], result['buy_ord_no'])) # 조건 통과 → 채택
+            if(b_Test == True) :
+                print(f" No{loop_su}.종목 [{store_code}] : [{stk_nm}] / 채결가 {now_price} 익절예약가 {(now_price + (now_price * (float_tp/100)))} TEST")
+                target_rows.append((store_code, stk_nm, now_price, result['buy_ord_no'])) # 조건 통과 → 채택
+                old_price.append(now_price)
+            else:
+                print(f" No{loop_su}.종목 [{store_code}] : [{stk_nm}] / 채결가 {result['buy_avg_price']:,} 익절예약가 {result['sell_price']:,}")
+                target_rows.append((store_code, stk_nm, result['buy_avg_price'], result['buy_ord_no'])) # 조건 통과 → 채택
+                old_price.append(result['buy_avg_price'])
         else:
             print(f" No{loop_su}.종목 [{store_code}] : [{stk_nm}] - 지정가 매수 실패 종목 PASS")
             loop_su = loop_su -1
@@ -211,13 +236,14 @@ def main():
             print(f"target_rows - No{loop_su}. 대상 종목 [{stk_cd}] : [{stk_nm}] / 주문번호 [{strength}] / 평균매수가격 {cur_p}")     
 
     #손절을 위한 모니터링 시작하기
-    print(f"+++++++++ [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 모니터링 시작")
+    print(f"+++++++++ [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 모니터링 시작\n")
 
     # 5) 가격 감시 루프 → 전량 손절가 매도
     loopcnt = 0    
     tpcnt = 0 #익절 카운트
     slcnt = 0 #손절 카운트
 
+    ''' # 시간으로 볼 건 아닌듯
     #첫번째 일괄 매도 시간까지만 해라
     try:
         tz = ZoneInfo("Asia/Seoul")
@@ -231,12 +257,19 @@ def main():
         # 루프 들어가기 전에 'sell_all_time1 - 5분' 목표시각을 한 번만 계산
         base = datetime.now(tz).replace(hour=int(sell_all_time1[:2]), minute=int(sell_all_time1[3:]), second=0, microsecond=0)
         target_dt = base + timedelta(minutes=-5)
+    '''
 
+    my_stock_cnt = 0
+    
+    if(b_Test == True):
+        my_stock_cnt = int_ea
+    
     while True:        
-        now = datetime.now(tz)
-        if now >= target_dt:
-            print(f"[{now:%H:%M:%S}] 목표시각 도달 → 모니터링 종료")
-            break
+#        now = datetime.now(tz)
+#        if now >= target_dt:
+#            print(f"[{now:%H:%M:%S}] 목표시각 도달 → 모니터링 종료")
+#            break    
+
         all_zero = all(v == 0 for v in go_or_stop)        
         if (all_zero is True):            
             print(f"--------- [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 모니터링 종료")            
@@ -248,6 +281,7 @@ def main():
 
         for stk_cd, stk_nm, resistance, strength in target_rows:
             loop_su = loop_su + 1           
+            tprint(f"target_ea = {target_ea} / loop_su = {loop_su} / go_or_stop = {go_or_stop[loop_su - 1]}")
             if target_ea < loop_su:
                 break            
 
@@ -255,8 +289,8 @@ def main():
                 store_code = stk_cd
                 # 1) 종목코드 현재가 확인
                 last = client.get_last_price(store_code)                
-                tp = floor_to(old_price[loop_su-1] * (1 + args.tp / 100.0),10)
-                sl = floor_to(old_price[loop_su-1] * (1 - args.sl / 100.0),10)
+                tp = floor_to(old_price[loop_su-1] * (1 + float_tp / 100.0),10)
+                sl = floor_to(old_price[loop_su-1] * (1 - float_sl / 100.0),10)
 
                 #TEST 모드에서는 1000원 씩 떨어져..ㅠㅠ  그래야 루프를 TEST 할 수 있어
                 if b_Test is True:                    
@@ -268,31 +302,38 @@ def main():
                 p_tp = format(_to_abs_int(tp),',')
                 p_sl = format(_to_abs_int(sl),',') 
 
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] No{loop_su}.종목 [{store_code}] : [{stk_nm}] ")
+                #print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] No{loop_su}.종목 [{store_code}] : [{stk_nm}] ")
                 print(f"모니터링 {loopcnt}회] 대상 종목 {loop_su}.  : {stk_nm}] 지금 가격: {p_last} / 구매 금액 {p_old_p} 익절 : {p_tp} 손절 : {p_sl}")                
-                
                 if last == 0 :
-                    print(f"대상 종목 {loop_su}. : {stk_nm}]가격 읽기 오류 loop = {loopcnt} 못 넘어가는겨 나간다")
+                    print(f"대상 종목 {loop_su}. : {stk_nm}]가격 읽기 오류 [모니터링 {loopcnt}회]")
                     continue
 
                 elif last >= tp or last <= sl:
                     if last >= tp :
                         tpcnt = tpcnt + 1
-                        print(f"대상 종목 {loop_su}. : {stk_nm}]목표가 도달({p_last} ≥ {p_tp}) → 전량 시장가 익절 매도")                        
-                    else :
-                        slcnt = slcnt + 1
-                        print(f"대상 종목 {loop_su}. : {stk_nm}]목표가 도달({p_last} ≥ {p_tp}) → 전량 시장가 손절 매도")
-                    
-                    sell_No = client.place_loss_cut_sell(buy_ord_no = strength, stk_cd = store_code)           
+                        print(f"대상 종목 {loop_su}. : {stk_nm}]목표가 도달({p_last} ≥ {p_tp}) → 전량 시장가 익절 매도 / 보유 종목수 {my_stock_cnt}")                        
+                        #모니터링 계속해야 겠지? 혹여 안팔려서 다시 밑으로 가면 손절해야하니까...
+                    else :                        
+                        print(f"대상 종목 {loop_su}. : {stk_nm}]목표가 도달({p_last} ≥ {p_tp}) → 전량 시장가 손절 매도 시도 / 보유 종목수 {my_stock_cnt}")
 
-                    if sell_No is None:
-                        print(f"대상 종목 {loop_su}. : {stk_nm}]주문 실패 했어요 잔고 확인해봐요!! \r\n 종료합니다!")                
-                    else:
-                        print(f"대상 종목 {loop_su}. : {stk_nm}]매도 완료 종료!\r\n주문번호 {sell_No} / 매도수량 {qty}")    
-                    go_or_stop[loop_su - 1] = 0
-                    continue #겹쳐 하지 않고 다음으로
+                        ret_val = client.place_loss_cut_sell(buy_ord_no = strength, stk_cd = store_code)   
+                        
+                        if(b_Test == True):
+                            my_stock_cnt = my_stock_cnt - 1
+                        else:
+                            my_stock_cnt = ret_val['stock_cnt']
 
-                clear_prev_lines(2) # 겹쳐 쓰기 2줄 위로
+                        if ret_val['sell_ord_no'] is None or b_Test != True:
+                            print(f"대상 종목 {loop_su}. : {stk_nm}]주문 실패 했어요 잔고 확인해봐요! 재 시도 해볼께요 / 보유 종목수 {my_stock_cnt}")
+                        else:
+                            print(f"대상 종목 {loop_su}. : {stk_nm}]매도 주문 완료 모니터링 종료! 주문번호 {ret_val['sell_ord_no']} / 매도수량 {qty} / 보유 종목수 {my_stock_cnt}")    
+                            slcnt = slcnt + 1
+                            go_or_stop[loop_su - 1] = 0   
+
+                clear_prev_lines(1) # 겹쳐 쓰기 위로       
+
+        if(my_stock_cnt <= 0):
+            break
     
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]매매 루프를 다 돌았다. \n전체 {target_ea} 개 중 [익절 {tpcnt}개] <> [손절 {slcnt}개]")
 
@@ -306,8 +347,8 @@ def main():
         wait_until(sell_all_time1)  
 
     result = client.place_market_sell_all(            
-            poll_sec=args.poll,
-            timeout_sec=args.timeout,
+            poll_sec=float_poll,
+            timeout_sec=float_timeout,
     )
     print(f"place_market_sell_all1 - {result}")    
           
@@ -319,8 +360,8 @@ def main():
         wait_until(sell_all_time2)  
 
     result = client.place_market_sell_all(            
-            poll_sec=args.poll,
-            timeout_sec=args.timeout,
+            poll_sec=float_poll,
+            timeout_sec=float_timeout,
     )
     print(f"place_market_sell_all2 - {result}")
           
@@ -331,8 +372,8 @@ def main():
         wait_until(sell_all_time3)  
 
     result = client.place_market_sell_all(            
-            poll_sec=args.poll,
-            timeout_sec=args.timeout,
+            poll_sec=float_poll,
+            timeout_sec=float_timeout,
     )
     print(f"place_market_sell_all3 - {result}")
 
