@@ -4,6 +4,7 @@
 # ===============================
 # python PApp.py --ea 10 --tp 4.0 --sl 2.0 --poll 1 --timeout 30
 # 이름 바꿀까?
+# 니 꼴리는대로 해라. 
 
 from __future__ import annotations
 import os
