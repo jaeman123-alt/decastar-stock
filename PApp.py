@@ -19,12 +19,10 @@ from auth import KiwoomAuth #요건 인증
 from kiwoom_client import KiwoomClient #요건 관련 함수
 from tools import * #요건 공통 함수
 
-start_time: str = "09:11"
+start_time: str = "00:00" # 00:00 일 경우 바로 시작
 
 #전체 잔고 매도 주문 시도 시간
-sell_all_time1: str = "11:00"
-sell_all_time2: str = "14:00"
-sell_all_time3: str = "15:20"
+sell_all_time1: str = "15:25"
 
 lim_price: int = 150000 # 비싼 건 넘기자고 
 
@@ -36,18 +34,22 @@ float_timeout: float = 30   #    ap.add_argument("--timeout", type=int, default=
 bool_check: bool = False     #    ap.add_argument("--check", action="store_true", help="있으면 대상 종목확인 / 없으면 실행")
 
 b_Tprint: bool = False # 요건 tprint 도 출력되도록 설정
-b_Test: bool = False # 요건 TEST 모드 장마감 후 에도 진행 test 설정
+b_Test: bool = True # 요건 TEST 모드 장마감 후 에도 진행 test 설정
 
 b_JMKEY: bool = False #True # JM 계좌 사용
 b_JMMode: bool = False #True # 매매 없이 JM 을 위해 종목선정까지만 동작하도록
 
 b_MeMe: bool = True #False #True # 매매 대상을 표시 해줌
 
-int_resol_code: int = 5 #예비로 더 읽어 올 종목수
+int_resol_code: int = 10 #예비로 더 읽어 올 종목수
 int_pick_code: int = 2 #1:JM 2:CY1 3:CY2
 
 #예약 기다리는 함수
 def wait_until(hhmm: str) -> None:
+
+    if(hhmm == "00:00"):
+        return
+
     """현재 시간을 1줄, 예약 시간을 그 아래 1줄로 표시.
     현재 시간 줄만 매초 갱신되며 화면이 스크롤되지 않습니다.
     예) "09:05" — 오늘 시간이 지났으면 내일 09:05로 예약.
@@ -91,6 +93,25 @@ def wait_until(hhmm: str) -> None:
 
 
 def main():    
+    
+    #로컬로 인식하는 오류가 있어!
+    global start_time
+    global sell_all_time1    
+    global lim_price
+    global int_ea
+    global float_tp
+    global float_sl
+    global float_poll
+    global float_timeout
+    global bool_check
+    global b_Tprint
+    global b_Test
+    global b_JMKEY
+    global b_JMMode
+    global b_MeMe
+    global int_resol_code
+    global int_pick_code
+
     set_test_mode(b_Tprint)  # <- b_Test tprint 사용할건가
     print(f"TEST Mode - {b_Test} - [MAIN] 시작합니다.") # b_Test = True 에만 출력됨
 
@@ -157,6 +178,7 @@ def main():
     loop_su = 0
     old_price = []
     go_or_stop = []
+    mystock = []    
     
     target_rows: list[tuple[str, str, str, str]] = []   
 
@@ -177,15 +199,15 @@ def main():
         # 2) 구매 가능 수량 
         qty = int(target_entr // now_price)
         if qty < 1:
-            print(f"[대상 종목 {loop_su}. : {stk_nm}] 현재가 {format(now_price,',')} / 구매가능수량 0 이 종목의 매수는 못혀.")
+            print(f"[대상 종목 {loop_su}. : {stk_nm}][{store_code}] 현재가 {format(now_price,',')} / 구매가능수량 0 이 종목의 매수는 못혀.")
             loop_su = loop_su -1
             continue
         elif now_price > lim_price: #10만원 넘는건 PASS혀
-            print(f"[대상 종목 {loop_su}. : {stk_nm}] 현재가 {format(now_price,',')} / 가격 리미트가 {format(lim_price,',')}원 임으로  이 종목의 매수는 못혀")            
+            print(f"[대상 종목 {loop_su}. : {stk_nm}][{store_code}] 현재가 {format(now_price,',')} / 가격 리미트가 {format(lim_price,',')}원 임으로  이 종목의 매수는 못혀")            
             loop_su = loop_su -1
             continue
         
-        print(f"[대상 종목 {loop_su}. : {stk_nm}] 현재가 {format(now_price,',')} / 구매가능수량 {qty}")
+        print(f"[대상 종목 {loop_su}. : {stk_nm}][{store_code}] 현재가 {format(now_price,',')} / 구매가능수량 {qty}")
         
         # 3) 지정가 매수 후 익절 예약 까지 
         result = client.place_limit_buy_then_oto_takeprofit(            
@@ -197,46 +219,35 @@ def main():
             timeout_sec=float_timeout,
         )
 
-        if(result['buy_ord_no'] != "지정가 매수실패" or b_Test == True):            
+        #sell_price -> tp_price = 0 이기 때문에 실패로 보고 buy_avg_price 가 None이 아니라면 buy_avg 가 있으면 실제 구매가 발생 취소해야함.
+        if(result['sell_price'] != 0 or b_Test == True):            
             if(b_Test == True) :
-                print(f" No{loop_su}.종목 [{store_code}] : [{stk_nm}] / 채결가 {now_price} 익절예약가 {(now_price + (now_price * (float_tp/100)))} TEST")
-                target_rows.append((store_code, stk_nm, now_price, result['buy_ord_no'])) # 조건 통과 → 채택
+                print(f" No{loop_su}.종목 [{stk_nm}][{store_code}] / 채결가 {now_price} 익절예약가 {(now_price + (now_price * (float_tp/100)))}  / 주문번호 [{result['buy_ord_no']}] TEST")
+                target_rows.append((store_code, stk_nm, now_price, result['sell_ord_no'])) # 조건 통과 → 채택
                 old_price.append(now_price)
             else:
-                print(f" No{loop_su}.종목 [{store_code}] : [{stk_nm}] / 채결가 {result['buy_avg_price']:,} 익절예약가 {result['sell_price']:,}")
-                target_rows.append((store_code, stk_nm, result['buy_avg_price'], result['buy_ord_no'])) # 조건 통과 → 채택
+                print(f" No{loop_su}.종목 [{stk_nm}][{store_code}] / 채결가 {result['buy_avg_price']:,} 익절예약가 {result['sell_price']:,} / 주문번호 [{result['buy_ord_no']}]")
+                target_rows.append((store_code, stk_nm, result['buy_avg_price'], result['sell_ord_no'])) # 조건 통과 → 채택
                 old_price.append(result['buy_avg_price'])
         else:
-            print(f" No{loop_su}.종목 [{store_code}] : [{stk_nm}] - 지정가 매수 실패 종목 PASS")
+            print(f" No{loop_su}.종목 [{stk_nm}][{store_code}] - 지정가 매수 실패 종목 PASS / 주문번호 [{result['buy_ord_no']}]")
+            #실패 했으면 주문 삭제            
+            ret_val = client.place_loss_cut_sell(result['sell_ord_no'], store_code)            
+            print(f" No{loop_su}.종목 [{stk_nm}][{store_code}] - 지정가 매수 실패 종목 시장가 청산 주문번호 [{ret_val['sell_ord_no']}]")
             loop_su = loop_su -1
             continue
         
-        #매수 실패 했을경우 어떻게 하징?
-        #매수는 성공하고 예약은 실패하면?
-        #일단 하면서 생각해보자
-
-        '''
-        # 3) 시장가 매수 후 익절 예약 까지        
-        result = place_market_buy_then_oto_takeprofit(
-            client,
-            stk_cd=store_code,            
-            buy_price=now_price, #TEST용
-            qty=qty,
-            take_profit_add=args.tp,
-            poll_sec=args.poll,
-            timeout_sec=args.timeout,
-        )
-        '''
     
-    if(b_MeMe == True): #Target_rows 를 출력합니다.
-        loop_su = 0
-        for stk_cd, stk_nm, resistance, strength in target_rows:  # strength 주문번호로 사용
-            loop_su = loop_su + 1
-            cur_p = format(_to_abs_int(resistance),',')            
-            print(f"target_rows - No{loop_su}. 대상 종목 [{stk_cd}] : [{stk_nm}] / 주문번호 [{strength}] / 평균매수가격 {cur_p}")     
+    loop_su = 0
+    for stk_cd, stk_nm, resistance, strength in target_rows:  # strength 주문번호로 사용
+        store_code = stk_cd
+        loop_su = loop_su + 1
+        cur_p = format(_to_abs_int(resistance),',')            
+        mystock.append(store_code)
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]target_rows - No{loop_su}. 대상 종목 : [{stk_nm}][{store_code}] / 주문번호 [{strength}] / 평균매수가격 {cur_p}")     
 
     #손절을 위한 모니터링 시작하기
-    print(f"+++++++++ [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 모니터링 시작\n")
+    print(f"\n+++++++++ [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 모니터링 시작\n")
 
     # 5) 가격 감시 루프 → 전량 손절가 매도
     loopcnt = 0    
@@ -287,6 +298,18 @@ def main():
 
             if(go_or_stop[loop_su - 1] == 1):
                 store_code = stk_cd
+                #내 계좌랑 확인하기
+                for mcode in mystock :
+                    tprint(f"mcode = {mcode} / mystock = {mystock} / store_code = {store_code}")                    
+                    if( mcode == store_code):
+                        tprint(f"break - mcode = {mcode} / mystock = {mystock} / store_code = {store_code}")                    
+                        break
+                else:
+                    #이미 리스트에서 삭제 되었음으로 삭제
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]모니터링 {loopcnt}회] 대상 종목 {loop_su}.  : {stk_nm}] 이미 리스트에서 삭제 되었음으로 삭제")                
+                    go_or_stop[loop_su - 1] = 0 
+                    break
+
                 # 1) 종목코드 현재가 확인
                 last = client.get_last_price(store_code)                
                 tp = floor_to(old_price[loop_su-1] * (1 + float_tp / 100.0),10)
@@ -303,18 +326,19 @@ def main():
                 p_sl = format(_to_abs_int(sl),',') 
 
                 #print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] No{loop_su}.종목 [{store_code}] : [{stk_nm}] ")
-                print(f"모니터링 {loopcnt}회] 대상 종목 {loop_su}.  : {stk_nm}] 지금 가격: {p_last} / 구매 금액 {p_old_p} 익절 : {p_tp} 손절 : {p_sl}")                
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]모니터링 {loopcnt}회] 대상 종목 {loop_su}.  : [{stk_nm}][{store_code}] 지금 가격: {p_last} / 구매 금액 {p_old_p} 익절 : {p_tp} 손절 : {p_sl}")                
                 if last == 0 :
-                    print(f"대상 종목 {loop_su}. : {stk_nm}]가격 읽기 오류 [모니터링 {loopcnt}회]")
+                    print(f"대상 종목 {loop_su}. : [{stk_nm}][{store_code}] 가격 읽기 오류 [모니터링 {loopcnt}회]")
                     continue
 
                 elif last >= tp or last <= sl:
                     if last >= tp :
                         tpcnt = tpcnt + 1
-                        print(f"대상 종목 {loop_su}. : {stk_nm}]목표가 도달({p_last} ≥ {p_tp}) → 전량 시장가 익절 매도 / 보유 종목수 {my_stock_cnt}")                        
-                        #모니터링 계속해야 겠지? 혹여 안팔려서 다시 밑으로 가면 손절해야하니까...
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]대상 종목 {loop_su}. : [{stk_nm}][{store_code}] 목표가 도달({p_last} ≥ {p_tp}) → 전량 시장가 익절 매도 / 보유 종목수 {my_stock_cnt}")                        
+                        go_or_stop[loop_su - 1] = 0   
+
                     else :                        
-                        print(f"대상 종목 {loop_su}. : {stk_nm}]목표가 도달({p_last} ≥ {p_tp}) → 전량 시장가 손절 매도 시도 / 보유 종목수 {my_stock_cnt}")
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]대상 종목 {loop_su}. : [{stk_nm}][{store_code}] 목표가 도달({p_last} ≥ {p_tp}) → 전량 시장가 손절 매도 시도 / 보유 종목수 {my_stock_cnt}")
 
                         ret_val = client.place_loss_cut_sell(buy_ord_no = strength, stk_cd = store_code)   
                         
@@ -324,66 +348,63 @@ def main():
                             my_stock_cnt = ret_val['stock_cnt']
 
                         if ret_val['sell_ord_no'] is None or b_Test != True:
-                            print(f"대상 종목 {loop_su}. : {stk_nm}]주문 실패 했어요 잔고 확인해봐요! 재 시도 해볼께요 / 보유 종목수 {my_stock_cnt}")
+                            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]대상 종목 {loop_su}. : [{stk_nm}][{store_code}] 주문 실패 했어요 잔고 확인해봐요! 재 시도 해볼께요 / 보유 종목수 {my_stock_cnt}")
                         else:
-                            print(f"대상 종목 {loop_su}. : {stk_nm}]매도 주문 완료 모니터링 종료! 주문번호 {ret_val['sell_ord_no']} / 매도수량 {qty} / 보유 종목수 {my_stock_cnt}")    
+                            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]대상 종목 {loop_su}. : [{stk_nm}][{store_code}] 매도 주문 완료 모니터링 종료! 주문번호 {ret_val['sell_ord_no']} / 매도수량 {qty} / 보유 종목수 {my_stock_cnt}")    
                             slcnt = slcnt + 1
                             go_or_stop[loop_su - 1] = 0   
 
-                clear_prev_lines(1) # 겹쳐 쓰기 위로       
+                #clear_prev_lines(1) # 겹쳐 쓰기 위로       
 
+        # 1) 나의 계좌를 보자 / 계좌에 없으면서 go_or_stop 가 1 이면 0 으로 바꿔서 더이상 모니터링 하지 않도록 해 주자
+        balance_info = client.get_my_all_stock()
+        time.sleep(1)
+        tprint(balance_info)
+        my_stock_cnt = len(balance_info)
+
+        for gval in balance_info :     
+            mystock.append(gval.get("stk_cd").replace("A", ""))            
+            tprint(f"{mystock}")
+
+        tprint(f"M get_my_all_stock -> {my_stock_cnt}")
         if(my_stock_cnt <= 0):
             break
     
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]매매 루프를 다 돌았다. \n전체 {target_ea} 개 중 [익절 {tpcnt}개] <> [손절 {slcnt}개]")
 
-    #이부분은 나중에 다시 확인하기
-
-    #남은 잔고 종목 일괄 시장가 매도 하기 오전 후
     #예약시간기다리기
     if(b_Test): 
         print(f"[TEST MODE]매도 하기 예약시간 {sell_all_time1} PASS")   
     else:
         wait_until(sell_all_time1)  
 
-    result = client.place_market_sell_all(            
-            poll_sec=float_poll,
-            timeout_sec=float_timeout,
-    )
-    print(f"place_market_sell_all1 - {result}")    
-          
-    #남은 잔고 종목 일괄 시장가 매도 하기2 점심 후
+    balance_info = client.get_my_all_stock()
+    time.sleep(1)
+    tprint(balance_info)
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]보유 종목 수는 {len(balance_info)} 입니다.")
     
-    if(b_Test): 
-        print(f"[TEST MODE]매도 하기 예약시간 {sell_all_time2} PASS")   
-    else:
-        wait_until(sell_all_time2)  
+    loop_su = 0
+    while True:        
+        loop_su = loop_su + 1
+        result = client.place_market_sell_all(            
+                poll_sec=float_poll,
+                timeout_sec=float_timeout,
+        )        
+        print(f"[{loop_su}]place_market_sell_all3 - {result}")
 
-    result = client.place_market_sell_all(            
-            poll_sec=float_poll,
-            timeout_sec=float_timeout,
-    )
-    print(f"place_market_sell_all2 - {result}")
-          
-    #남은 잔고 종목 일괄 시장가 매도 하기3 장마감 전
-    if(b_Test): 
-        print(f"[TEST MODE]매도 하기 예약시간 {sell_all_time3} PASS")   
-    else:
-        wait_until(sell_all_time3)  
+        balance_info = client.get_my_all_stock()
+        time.sleep(1)
+        print(balance_info)
+        print(f"[{loop_su}]보유 종목 수는 {len(balance_info)} 입니다.")
 
-    result = client.place_market_sell_all(            
-            poll_sec=float_poll,
-            timeout_sec=float_timeout,
-    )
-    print(f"place_market_sell_all3 - {result}")
+        for gval in balance_info :
+            print(f"[{loop_su}]보유 종목 수는 {len(balance_info)} 입니다.")
+            print(f"[{loop_su}]{gval.get("stk_cd")} / {gval.get("stk_nm")} / {gval.get("rmnd_qty")} / {gval.get("trde_able_qty")} / {gval.get("cur_prc")}")            
 
-    #결과 보여주기
-    #print(f"모두 끝났습니다.")
-    # 그날 결과 보여주는 함수도 만들어야..
-    # 다시 시작하는 루프로 만들던가
-    # 뭔가 더 해야 할것 같으나 차차 생각해 보자
+        if(len(balance_info) == 0): 
+            break
 
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]몽땅완료!")
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]몽땅완료!")       
 
 if __name__ == "__main__":
     main()

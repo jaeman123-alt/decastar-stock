@@ -130,7 +130,7 @@ class KiwoomClient:
         tprint (f"place_sell_limit : {ord_no}") 
         if not ord_no:
             #raise RuntimeError(f"매도주문 응답에 주문번호가 없습니다: {data}")
-            ord_no = "매도주문 응답에 주문번호가 없습니다: {data}"
+            ord_no = "매도주문 응답에 주문번호가 없습니다:"
         return ord_no
     
     def place_sell_market(self, stk_cd: str, qty: int) -> str:
@@ -154,6 +154,7 @@ class KiwoomClient:
         return ord_no
     
     def place_sell_order_cancel(self, orig_ord_no: str, stk_cd: str, qty: int = 0) -> str:
+        tprint (f"place_sell_order_cancel -> orig_ord_no = {orig_ord_no} / stk_cd = {stk_cd} / qty = {qty}") 
         tcode = stk_cd.replace("A", "") 
         #왜 A가 붙어 있나.. 
         body = {
@@ -281,7 +282,7 @@ class KiwoomClient:
             if(int_rflu > (tp*100)): #부호가 제거된 등락률이 상한 포로핏보다 크면 저장하기
                 ret_val.append((self.rcode, self.rname, self.rprice, self.rflu))
         
-            print(f"get_stoke_code? {self.rcode} / {self.rname} / {self.rprice} / {self.rflu}")
+            tprint(f"get_stoke_code? {self.rcode} / {self.rname} / {self.rprice} / {self.rflu}")
 
         return ret_val    
     
@@ -314,7 +315,7 @@ class KiwoomClient:
             if(int_rflu > (tp*100)): #부호가 제거된 등락률이 상한 포로핏보다 크면 저장하기
                 ret_val.append((self.rcode, self.rname, self.rprice, self.rflu))
 
-            print(f"get_stoke_code_yesterday? {self.rcode} / {self.rname} / {self.rprice} / {self.rflu}")
+            tprint(f"get_stoke_code_yesterday? {self.rcode} / {self.rname} / {self.rprice} / {self.rflu}")
 
         return ret_val  
 
@@ -334,11 +335,13 @@ class KiwoomClient:
         """
         # 1) 지정가 매수 접수
         buy_ord_no = self.place_buy_limit(stk_cd=stk_cd, qty=qty, price=buy_price)
+        sell_ord_no = None
 
         # 2) 체결 대기(누적 체결수량 == 주문수량까지)
         deadline = time.time() + timeout_sec
         buy_avg: Optional[int] = None
         buy_ord_qty: Optional[int] = None
+        
         while time.time() < deadline:
             summ = self.get_order_fill_summary(buy_ord_no)
             buy_ord_qty = summ.get("ord_qty")
@@ -350,14 +353,21 @@ class KiwoomClient:
             #raise TimeoutError(f"매수 체결 대기 타임아웃: ord_no={buy_ord_no}")            
             buy_avg = buy_price # 이건 Time Out이 걸려도 그냥 넘어가도록 한 것임 
             print(f"[지정가 매수실패] == Timeout {timeout_sec} Sec ==")
-            buy_ord_no = '지정가 매수실패'
-            buy_avg = 0
-            sell_ord_no = '지정가 매수실패'
+            #buy_ord_no = '지정가 매수실패'
+            #buy_avg = 0
+            #sell_ord_no = '지정가 매수실패'
             tp_price = 0
         else:
             # 3) 익절 지정가 매도 접수 (매수 체결평단 + 익절가)
             tp_price = floor_to(int(buy_avg + (buy_avg * (take_profit_add/100))), 50)    
             sell_ord_no = self.place_sell_limit(stk_cd=stk_cd, qty=buy_ord_qty, price=tp_price)
+            while time.time() < deadline:
+                summ = self.get_order_fill_summary(buy_ord_no)
+                buy_ord_qty = summ.get("ord_qty")
+                if buy_ord_qty and summ.get("filled_qty") >= buy_ord_qty:
+                    buy_avg = summ.get("avg_price") or buy_price
+                    break
+                time.sleep(poll_sec)
         
         return {
             "buy_ord_no": buy_ord_no,
@@ -419,9 +429,10 @@ class KiwoomClient:
         balance_info = self.get_my_all_stock()
         time.sleep(1)
         tprint(balance_info)
-        print(f"보유 종목 수는 {len(balance_info)} 입니다.")
+        tprint(f"보유 종목 수는 {len(balance_info)} 입니다.")
         
         result = self.get_order_List()
+        time.sleep(1)
         ret_no = None
 
         for r in result:    
@@ -435,6 +446,7 @@ class KiwoomClient:
     
         # 잔고에서 매도 주문 실행
         for stock in balance_info:
+            tprint(f"place_market_sell_all -> stk_cd = {stock['stk_cd']} / trde_able_qty = {int(stock['trde_able_qty'])}")
             sell_no = self.place_sell_market(stock['stk_cd'],int(stock['trde_able_qty']))
             tprint(f"sell_no{ret_no}")
             time.sleep(1)
@@ -460,16 +472,24 @@ class KiwoomClient:
         tprint(balance_info)
         stock_cnt = len(balance_info)
 
+        tprint(f"get_my_all_stock -> {stock_cnt}")
+
         t_qty = 0
         sell_no = None
+        
+
         # 잔고에서 매도 주문 실행
         for stock in balance_info:
-            if int(stock['stk_cd'] == stk_cd):
+            tcode = stock['stk_cd'].replace("A", "") 
+            tprint(f"balance_info Check -> {tcode} == {stk_cd}) / t_qyt = {t_qty}")
+            if int(tcode == stk_cd):                
                 t_qty = int(stock['trde_able_qty'])
+                tprint(f"place_loss_cut_sell -> {tcode} == {stk_cd}) / t_qyt = {t_qty}")
                 break
 
         if t_qty > 0:  # 매도 가능한 수량이 있는 경우
             sell_no = self.place_sell_market(stk_cd, t_qty)
+            tprint(f"place_loss_cut_sell -> sell_no - [{sell_no}] / {tcode} == {stk_cd}) / t_qyt = {t_qty}")
             tprint(f"sell_no{sell_no}")
             time.sleep(1)
 
