@@ -34,7 +34,7 @@ float_timeout: float = 30   #    ap.add_argument("--timeout", type=int, default=
 bool_check: bool = False     #    ap.add_argument("--check", action="store_true", help="있으면 대상 종목확인 / 없으면 실행")
 
 b_Tprint: bool = False # 요건 tprint 도 출력되도록 설정
-b_Test: bool = True # 요건 TEST 모드 장마감 후 에도 진행 test 설정
+b_Test: bool = False # 요건 TEST 모드 장마감 후 에도 진행 test 설정
 
 b_JMKEY: bool = False #True # JM 계좌 사용
 b_JMMode: bool = False #True # 매매 없이 JM 을 위해 종목선정까지만 동작하도록
@@ -238,6 +238,7 @@ def main():
             continue
         
     
+    mystock = [] 
     loop_su = 0
     for stk_cd, stk_nm, resistance, strength in target_rows:  # strength 주문번호로 사용
         store_code = stk_cd
@@ -254,21 +255,14 @@ def main():
     tpcnt = 0 #익절 카운트
     slcnt = 0 #손절 카운트
 
-    ''' # 시간으로 볼 건 아닌듯
     #첫번째 일괄 매도 시간까지만 해라
     try:
         tz = ZoneInfo("Asia/Seoul")
     except Exception:
         tz = ZoneInfo("ROK")
 
-    if(b_Test == True):
-        base = datetime.now(tz)
-        target_dt = base + timedelta(minutes=5)    
-    else:
-        # 루프 들어가기 전에 'sell_all_time1 - 5분' 목표시각을 한 번만 계산
-        base = datetime.now(tz).replace(hour=int(sell_all_time1[:2]), minute=int(sell_all_time1[3:]), second=0, microsecond=0)
-        target_dt = base + timedelta(minutes=-5)
-    '''
+    base = datetime.now(tz).replace(hour=int(sell_all_time1[:2]), minute=int(sell_all_time1[3:]), second=0, microsecond=0)
+    target_dt = base # + timedelta(minutes=-5)
 
     my_stock_cnt = 0
     
@@ -276,10 +270,10 @@ def main():
         my_stock_cnt = int_ea
     
     while True:        
-#        now = datetime.now(tz)
-#        if now >= target_dt:
-#            print(f"[{now:%H:%M:%S}] 목표시각 도달 → 모니터링 종료")
-#            break    
+        now = datetime.now(tz)
+        if now >= target_dt and b_Test != True:
+            print(f"[{now:%H:%M:%S}] 목표시각 도달 → 모니터링 종료")
+            break    
 
         all_zero = all(v == 0 for v in go_or_stop)        
         if (all_zero is True):            
@@ -306,7 +300,7 @@ def main():
                         break
                 else:
                     #이미 리스트에서 삭제 되었음으로 삭제
-                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]모니터링 {loopcnt}회] 대상 종목 {loop_su}.  : {stk_nm}] 이미 리스트에서 삭제 되었음으로 삭제")                
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]모니터링 {loopcnt}회] 대상 종목 {loop_su}.  : [{stk_nm}][{store_code}] 이미 리스트에서 삭제 되었음으로 삭제")                
                     go_or_stop[loop_su - 1] = 0 
                     break
 
@@ -362,6 +356,7 @@ def main():
         tprint(balance_info)
         my_stock_cnt = len(balance_info)
 
+        mystock = [] 
         for gval in balance_info :     
             mystock.append(gval.get("stk_cd").replace("A", ""))            
             tprint(f"{mystock}")
@@ -371,39 +366,6 @@ def main():
             break
     
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]매매 루프를 다 돌았다. \n전체 {target_ea} 개 중 [익절 {tpcnt}개] <> [손절 {slcnt}개]")
-
-    #예약시간기다리기
-    if(b_Test): 
-        print(f"[TEST MODE]매도 하기 예약시간 {sell_all_time1} PASS")   
-    else:
-        wait_until(sell_all_time1)  
-
-    balance_info = client.get_my_all_stock()
-    time.sleep(1)
-    tprint(balance_info)
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]보유 종목 수는 {len(balance_info)} 입니다.")
-    
-    loop_su = 0
-    while True:        
-        loop_su = loop_su + 1
-        result = client.place_market_sell_all(            
-                poll_sec=float_poll,
-                timeout_sec=float_timeout,
-        )        
-        print(f"[{loop_su}]place_market_sell_all3 - {result}")
-
-        balance_info = client.get_my_all_stock()
-        time.sleep(1)
-        print(balance_info)
-        print(f"[{loop_su}]보유 종목 수는 {len(balance_info)} 입니다.")
-
-        for gval in balance_info :
-            print(f"[{loop_su}]보유 종목 수는 {len(balance_info)} 입니다.")
-            print(f"[{loop_su}]{gval.get("stk_cd")} / {gval.get("stk_nm")} / {gval.get("rmnd_qty")} / {gval.get("trde_able_qty")} / {gval.get("cur_prc")}")            
-
-        if(len(balance_info) == 0): 
-            break
-
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]몽땅완료!")       
 
 if __name__ == "__main__":
