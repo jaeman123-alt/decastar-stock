@@ -126,12 +126,17 @@ class KiwoomClient:
             "cond_uv": "",
         }
         data = self._post("/api/dostk/ordr", api_id="kt10001", body=body)
+        ret_code = data.get("return_code")
         ord_no = data.get("ord_no")
-        tprint (f"place_sell_limit : {ord_no}") 
-        if not ord_no:
-            #raise RuntimeError(f"매도주문 응답에 주문번호가 없습니다: {data}")
-            ord_no = "매도주문 응답에 주문번호가 없습니다:"
+        print (f"place_sell_limit : {ret_code} / {ord_no}") 
+
+        if(ret_code != 0):
+            if not ord_no:
+                #raise RuntimeError(f"매도주문 응답에 주문번호가 없습니다: {data}")
+                ord_no = "매도주문 응답에 주문번호가 없습니다:"
+        
         return ord_no
+
     
     def place_sell_market(self, stk_cd: str, qty: int) -> str:
         tcode = stk_cd.replace("A", "") 
@@ -336,13 +341,18 @@ class KiwoomClient:
         # 1) 지정가 매수 접수
         buy_ord_no = self.place_buy_limit(stk_cd=stk_cd, qty=qty, price=buy_price)
         sell_ord_no = None
+        
+        loop_su0 = 0
+        loop_su1 = 0
 
         # 2) 체결 대기(누적 체결수량 == 주문수량까지)
         deadline = time.time() + timeout_sec
+        deadline2 = time.time() + timeout_sec
         buy_avg: Optional[int] = None
         buy_ord_qty: Optional[int] = None
         
         while time.time() < deadline:
+            loop_su0 = loop_su0 + 1
             summ = self.get_order_fill_summary(buy_ord_no)
             buy_ord_qty = summ.get("ord_qty")
             if buy_ord_qty and summ.get("filled_qty") >= buy_ord_qty:
@@ -359,14 +369,17 @@ class KiwoomClient:
             tp_price = 0
         else:
             # 3) 익절 지정가 매도 접수 (매수 체결평단 + 익절가)
+            loop_su1 = 0
+            deadline2 = time.time() + timeout_sec
             tp_price = floor_to(int(buy_avg + (buy_avg * (take_profit_add/100))), 50)    
-            sell_ord_no = self.place_sell_limit(stk_cd=stk_cd, qty=buy_ord_qty, price=tp_price)
-            time.sleep(poll_sec)
-            while time.time() < deadline:
-                summ = self.get_order_fill_summary(buy_ord_no)
-                buy_ord_qty = summ.get("ord_qty")
-                if buy_ord_qty and summ.get("filled_qty") >= buy_ord_qty:
-                    buy_avg = summ.get("avg_price") or buy_price
+            while time.time() < deadline2:
+                loop_su1 = loop_su1 + 1
+                sell_ord_no = self.place_sell_limit(stk_cd=stk_cd, qty=buy_ord_qty, price=tp_price)                
+                if sell_ord_no is None or sell_ord_no.__contains__("없습니다"):
+                    print(f"[익절 지정가 매도 접수 실패][재시도 {loop_su1} 회] 종목:[{stk_cd}] 수량:[{buy_ord_qty}] 가격:[{tp_price}] / {sell_ord_no} ")
+                    tp_price = 0 #취소하도록
+                else:
+                    print(f"[익절 지정가 매도 OK] 종목:[{stk_cd}] 수량:[{buy_ord_qty}] 가격:[{tp_price}] / {sell_ord_no} ")
                     break
                 time.sleep(poll_sec)
         
@@ -737,7 +750,7 @@ class KiwoomClient:
             strength = self.check_contract_strength(stk_cd)
             time.sleep(1)
             if strength < 120.0:                
-                clear_prev_lines(1) # 겹쳐 쓰기 1줄 위로
+                #clear_prev_lines(1) # 겹쳐 쓰기 1줄 위로
                 print(f"제외: [{stk_nm}] 체결 강도 {strength:.2f} (120 미만)")                
                 continue # 체결강도 120 이상인 종목만 추적
 

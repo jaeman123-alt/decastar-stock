@@ -42,7 +42,7 @@ b_JMMode: bool = False #True # 매매 없이 JM 을 위해 종목선정까지만
 b_MeMe: bool = True #False #True # 매매 대상을 표시 해줌
 
 int_resol_code: int = 10 #예비로 더 읽어 올 종목수
-int_pick_code: int = 2 #1:JM 2:CY1 3:CY2
+int_pick_code: int = 3 #1:JM 2:CY1 3:CY2
 
 #예약 기다리는 함수
 def wait_until(hhmm: str) -> None:
