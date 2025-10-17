@@ -564,6 +564,87 @@ class KiwoomClient:
     
 #==============================================================
     
+    # ka10027 전일 대비 등락률 상위 요청
+    def get_pred_pre_flu_rt_upper(self, trde_prica: int) -> List[Dict]:
+
+        body = {
+            "mrkt_tp": "000",        # 시장구분: 000 (전체)
+            "sort_tp": "1",          # 정렬구분: 1 (상승률 순)  1:상승률, 2:상승폭, 3:하락률, 4:하락폭, 5:보합
+            "trde_qty_cnd": "000" ,  # 거래량 조건: #0000:전체조회, 0010:만주이상, 0050:5만주이상,
+            "stk_cnd": "16",         # 종목조건: 16 (ETF+ETN제외)
+            "crd_cnd": "0",          # 신용조건: 0 (전체 조회)
+            "updown_incls": "1",      # 상하한 포함: 1 (포함)
+            "pric_cnd": "0",         # 가격 조건: 0 (전체 조회)
+            "trde_prica_cnd": f"{trde_prica}", # 거래대금 조건: 1000 (100억 원 이상)  
+            # 100:10억원이상, 300:30억원이상, 500:50억원이상, 1000:100억원이상,
+            "stex_tp": "1"           # 거래소 구분: 1 (KRX)
+        }
+
+        data = self._post("/api/dostk/rkinfo", api_id="ka10027", body=body)
+
+        if data.get("return_code") == 0:
+            top_stocks = data.get("pred_pre_flu_rt_upper", [])
+                
+            if not top_stocks:
+                print("조회된 종목이 없습니다.")
+                return []
+         
+            #"""
+            for stock in top_stocks:
+                print(
+                    f"순위: {top_stocks.index(stock) + 1}, "
+                    f"종목명: {stock.get('stk_nm')}, "
+                    f"코드: {stock.get('stk_cd')}, "
+                    f"등락률: {stock.get('flu_rt')}, "
+                )
+            #"""
+
+            return top_stocks
+
+        else:
+            print(f"API 요청 실패: {data.get('return_msg')}")
+            return None
+
+
+    # ka10030 당일 거래량 상위 요청
+    def get_tdy_trde_qty_upper(self) -> List[Dict]:
+
+        body = {
+            'mrkt_tp': '000', # 시장구분 000:전체, 001:코스피, 101:코스닥
+            'sort_tp': '1', # 정렬구분 1:거래량, 2:거래회전율, 3:거래대금
+            'mang_stk_incls': '1', # 관리종목포함 0:관리종목 포함, 1:관리종목 미포함, 3:우선주제외, 11:정리매매종목제외, 4:관리종목, 우선주제외, 5:증100제외, 6:증100마나보기, 13:증60만보기, 12:증50만보기, 7:증40만보기, 8:증30만보기, 9:증20만보기, 14:ETF제외, 15:스팩제외, 16:ETF+ETN제외
+            'crd_tp': '0', # 신용구분 0:전체조회, 9:신용융자전체, 1:신용융자A군, 2:신용융자B군, 3:신용융자C군, 4:신용융자D군, 8:신용대주
+            'trde_qty_tp': '0', # 거래량구분 0:전체조회, 5:5천주이상, 10:1만주이상, 50:5만주이상, 100:10만주이상, 200:20만주이상, 300:30만주이상, 500:500만주이상, 1000:백만주이상
+            'pric_tp': '0', # 가격구분 0:전체조회, 1:1천원미만, 2:1천원이상, 3:1천원~2천원, 4:2천원~5천원, 5:5천원이상, 6:5천원~1만원, 10:1만원미만, 7:1만원이상, 8:5만원이상, 9:10만원이상
+            'trde_prica_tp': '0', # 거래대금구분 0:전체조회, 1:1천만원이상, 3:3천만원이상, 4:5천만원이상, 10:1억원이상, 30:3억원이상, 50:5억원이상, 100:10억원이상, 300:30억원이상, 500:50억원이상, 1000:100억원이상, 3000:300억원이상, 5000:500억원이상
+            'mrkt_open_tp': '0', # 장운영구분 0:전체조회, 1:장중, 2:장전시간외, 3:장후시간외
+            'stex_tp': '1', # 거래소구분 1:KRX, 2:NXT 3.통합
+        }
+        data = self._post("/api/dostk/rkinfo", api_id="ka10030", body=body)
+
+        if data.get("return_code") == 0:
+            top_stocks = data.get("tdy_trde_qty_upper", [])
+                
+            if not top_stocks:
+                print("조회된 종목이 없습니다.")
+                return []
+         
+            #"""
+            for stock in top_stocks:
+                print(
+                    f"순위: {top_stocks.index(stock) + 1}, "
+                    f"종목명: {stock.get('stk_nm')}, "
+                    f"코드: {stock.get('stk_cd')}, "
+                    f"거래량: {stock.get('trde_qty')}"
+                )
+            #"""
+
+            return top_stocks
+
+        else:
+            print(f"API 요청 실패: {data.get('return_msg')}")
+            return None
+
     # 전일거래대금 상위요청
     def get_prev_day_top_by_value(self) -> list[tuple[str, str, str, str]]:
     
@@ -762,6 +843,53 @@ class KiwoomClient:
         else:
             print(f"API 요청 실패: {data.get('return_msg')}")
             return None
+            
+
+        """
+        list_fluct = self.get_pred_pre_flu_rt_upper(1000)
+        print(f"## 전일 대비 등락률 상위 요청 종목 수: {len(list_fluct)}개. \n")
+        time.sleep(1)
+        list_trde_prica = self.get_tdy_trde_qty_upper()
+        print(f"## 당일 거래량 상위 요청 종목 수: {len(list_trde_prica)}개. \n")
+
+        #common_stks = list(set(list_fluct.keys()) & set(list_trde_prica.keys()))
+ 
+        fluct_cd = {stock['stk_cd'] for stock in list_fluct}  # 등락률 리스트에서 종목명 추출
+        trde_cd = {stock['stk_cd'] for stock in list_trde_prica}  # 거래대금 리스트에서 종목명 추출
+
+        common_stks_cd = list(fluct_cd & trde_cd)  # 교집합 계산
+        print(f"## 교집합 종목: {len(common_stks_cd)}개. \n")
+
+        final_candidates = []
+        
+        if common_stks_cd:
+            for stk_cd in common_stks_cd:
+                data = list_trde_prica[stk_cd] 
+                final_candidates.append({
+                    "stk_nm": data["stk_nm"],
+                    "stk_cd": stk_cd,
+                    "flu_rt": list_fluct[stk_cd]["flu_rt"],
+                    "trde_prica": data["trde_prica"]
+                })
+        
+        # 만약 교집합 종목이 목표 수량보다 적다면, 리스트에서 추가 검증필요 (유동성 높은 순)
+        if len(final_candidates) < 5: 
+            print(f"=== 추가 종목 선정: 유동성 상위({len(final_candidates)}개만 포착) ===")
+            # ka10032 리스트에서 아직 포함되지 않은 종목을 거래대금 순으로 추가
+            for stk_cd, data in list_trde_prica.items():
+                if stk_cd not in common_stks and len(final_candidates) < 5:
+                    final_candidates.append({
+                        "stk_cd": stk_cd,
+                        "flu_rt": "N/A",
+                        "trde_prica": data["trde_prica"]
+                    })
+        
+        print("\n--- 최종 단타 매매 후보 종목  ---")
+        for item in final_candidates:
+            print(f"종목명: {item['stk_nm']}, 종목코드: {item['stk_cd']}, 등락률: {item['flu_rt']}, 거래대금(억): {item['trde_prica']}")
+
+        return final_candidates
+        """    
 
 # ----------------------------------------------------
     # 종목 선정
@@ -797,7 +925,7 @@ class KiwoomClient:
             # 2-1. 체결 강도 확인 (실시간 매수세)            
             strength = self.check_contract_strength(stk_cd)
             time.sleep(1)
-            if strength < 120.0:                
+            if strength < 120.0:  # 체결강도 120은 매수세가 매도세보다 20% 강하다는 뜻이지만, 100은 중간이라, 하락 추세 위험이 높다.             
                 #clear_prev_lines(1) # 겹쳐 쓰기 1줄 위로
                 print(f"제외: [{stk_nm}] 체결 강도 {strength:.2f} (120 미만)")                
                 continue # 체결강도 120 이상인 종목만 추적
