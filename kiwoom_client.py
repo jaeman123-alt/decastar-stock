@@ -114,8 +114,51 @@ class KiwoomClient:
             #raise RuntimeError(f"시장가 매수 응답에 주문번호가 없습니다: {data}")
             ord_no = "시장가 매수 응답에 주문번호가 없습니다: {data}"
         return ord_no
+    
+    def place_sell_limit(
+        self,
+        stk_cd: str,
+        qty: int,
+        price: int,
+        max_retries: int = 5,
+        retry_delay: float = 1.0,  # 초 단위
+    ) -> str:
+                
+        tcode = stk_cd.replace("A", "")
 
-    def place_sell_limit(self, stk_cd: str, qty: int, price: int) -> str:
+        body = {
+            "dmst_stex_tp": "KRX",
+            "stk_cd": tcode,
+            "ord_qty": f"{qty}",
+            "ord_uv": f"{price}",
+            "trde_tp": "0",  # 보통(지정가)
+            "cond_uv": "",
+        }
+
+        for attempt in range(1, max_retries + 1):
+            data = self._post("/api/dostk/ordr", api_id="kt10001", body=body)
+            ord_no = data.get("ord_no")
+            ret_msg = data.get("return_msg")
+            ret_code = data.get("return_code")
+
+            if ord_no:  # 정상적으로 주문번호를 받음
+                print(f"[✅ 성공] place_sell_limit({stk_cd}) 주문번호: {ord_no}")
+                return ord_no
+            
+            if ret_msg.__contains__("RC4"):  # 재시도 없이 바로 스킵해 아는 에러 RC4... 오류입니다.
+                msg = f"[❌ 실패] 아는 오류 : code = {ret_code} msg = {ret_msg} / {data} "
+                return msg                
+
+            # 주문번호가 없을 경우
+            print(f"[⚠️ 재시도 {attempt}/{max_retries}] 주문번호 응답이 없습니다. 잠시 대기합니다...")
+            time.sleep(retry_delay)
+
+        # 모든 재시도 후에도 실패한 경우
+        msg = f"[❌ 실패] 매도주문 응답에 주문번호가 없습니다: {data}"
+        print(msg)
+        return msg
+
+    def place_sell_limit2(self, stk_cd: str, qty: int, price: int) -> str:
         tcode = stk_cd.replace("A", "") 
         body = {
             "dmst_stex_tp": "KRX",
@@ -375,7 +418,7 @@ class KiwoomClient:
             while time.time() < deadline2:
                 loop_su1 = loop_su1 + 1
                 sell_ord_no = self.place_sell_limit(stk_cd=stk_cd, qty=buy_ord_qty, price=tp_price)                
-                if sell_ord_no is None or sell_ord_no.__contains__("없습니다"):
+                if sell_ord_no is None or sell_ord_no.__contains__("실패"):
                     print(f"[익절 지정가 매도 접수 실패][재시도 {loop_su1} 회] 종목:[{stk_cd}] 수량:[{buy_ord_qty}] 가격:[{tp_price}] / {sell_ord_no} ")
                     tp_price = 0 #취소하도록
                 else:
