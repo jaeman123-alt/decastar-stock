@@ -361,6 +361,7 @@ class KiwoomClient:
             # 3) 익절 지정가 매도 접수 (매수 체결평단 + 익절가)
             tp_price = floor_to(int(buy_avg + (buy_avg * (take_profit_add/100))), 50)    
             sell_ord_no = self.place_sell_limit(stk_cd=stk_cd, qty=buy_ord_qty, price=tp_price)
+            time.sleep(poll_sec)
             while time.time() < deadline:
                 summ = self.get_order_fill_summary(buy_ord_no)
                 buy_ord_qty = summ.get("ord_qty")

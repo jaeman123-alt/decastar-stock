@@ -146,26 +146,33 @@ def main():
     tprint(balance_info)
     print(f"보유 종목 수는 {len(balance_info)} 입니다.")
     
-    loop_su = 0
-    while True:        
+
+    #보유 주식 정리 ( TEST 에서 시작하기전에 비우고 시작하기 위해 )
+    balance_info = client.get_my_all_stock()    
+    time.sleep(1)
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]보유 종목 수는 {len(balance_info)} 입니다.")
+    
+    loop_su = 0    
+    while True:
         loop_su = loop_su + 1
         result = client.place_market_sell_all(            
                 poll_sec=float_poll,
                 timeout_sec=float_timeout,
         )        
-        print(f"[{loop_su}]place_market_sell_all3 - {result}")
-
-        balance_info = client.get_my_all_stock()
         time.sleep(1)
-        print(balance_info)
-        print(f"[{loop_su}]보유 종목 수는 {len(balance_info)} 입니다.")
-
-        for gval in balance_info :
-            print(f"[{loop_su}]보유 종목 수는 {len(balance_info)} 입니다.")
-            print(f"[{loop_su}]{gval.get("stk_cd")} / {gval.get("stk_nm")} / {gval.get("rmnd_qty")} / {gval.get("trde_able_qty")} / {gval.get("cur_prc")}")            
+        
+        balance_info = client.get_my_all_stock()   
+        time.sleep(1)            
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][{loop_su}]보유 종목 수는 {len(balance_info)} 입니다.")
 
         if(len(balance_info) == 0): 
             break
+
+        for gval in balance_info :            
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][{loop_su}][{gval.get("stk_cd")} / {gval.get("stk_nm")}] / rmnd_qty = {format(_to_abs_int(gval.get("rmnd_qty")),',') } / trde_able_qty = {format(_to_abs_int(gval.get("trde_able_qty")),',')} / cur_prc = {format(_to_abs_int(gval.get("cur_prc")),',')}")            
+
+        time.sleep(float_timeout)
+
 
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]몽땅완료!")
 
