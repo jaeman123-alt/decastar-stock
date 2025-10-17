@@ -175,6 +175,9 @@ def main():
         for gval in balance_info :            
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][{loop_su}][{gval.get("stk_cd")} / {gval.get("stk_nm")}] / rmnd_qty = {format(_to_abs_int(gval.get("rmnd_qty")),',') } / trde_able_qty = {format(_to_abs_int(gval.get("trde_able_qty")),',')} / cur_prc = {format(_to_abs_int(gval.get("cur_prc")),',')}")            
 
+        if(b_Test == True):
+            break
+        
         time.sleep(float_timeout)
 
 
@@ -288,6 +291,7 @@ def main():
     loopcnt = 0    
     tpcnt = 0 #익절 카운트
     slcnt = 0 #손절 카운트
+    uncnt = 0 #모름 카운트
 
     #첫번째 일괄 매도 시간까지만 해라
     try:
@@ -334,7 +338,8 @@ def main():
                         break
                 else:
                     #이미 리스트에서 삭제 되었음으로 삭제
-                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]모니터링 {loopcnt}회] 대상 종목 {loop_su}.  : [{stk_nm}][{store_code}] 이미 리스트에서 삭제 되었음으로 삭제\n")                
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]모니터링 {loopcnt}회] 대상 종목 {loop_su}.  : [{stk_nm}][{store_code}] 이미 리스트에서 삭제 되었음으로 삭제\n")  
+                    uncnt = uncnt + 1 #상태를 모르니 모름 카운트
                     go_or_stop[loop_su - 1] = 0 
                     break
 
@@ -398,9 +403,36 @@ def main():
         tprint(f"M get_my_all_stock -> {my_stock_cnt}")
         if(my_stock_cnt <= 0):
             break        
+
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]모니터링 {loopcnt}회] 완료. 모니터링 종목 수 {my_stock_cnt} \n")
-    
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]매매 루프를 다 돌았다. \n전체 {target_ea} 개 중 [익절 {tpcnt}개] <> [손절 {slcnt}개]")
+
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]매매 루프를 다 돌았다. \n전체 {target_ea} 개 = [익절 {tpcnt}개] + [손절 {slcnt}개] + [모름 {uncnt}]개 + [모니터링중 {my_stock_cnt}]\n")
+
+    #모니터링중인 종목들 정리
+    if(my_stock_cnt > 0):
+        loop_su = 0    
+        while True:
+            loop_su = loop_su + 1
+            result = client.place_market_sell_all(            
+                    poll_sec=float_poll,
+                    timeout_sec=float_timeout,
+            )        
+            time.sleep(1)
+            
+            balance_info = client.get_my_all_stock()   
+            time.sleep(1)            
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][{loop_su}]보유 종목 수는 {len(balance_info)} 입니다.")
+
+            if(len(balance_info) == 0): 
+                break
+
+            for gval in balance_info :            
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][{loop_su}][{gval.get("stk_cd")} / {gval.get("stk_nm")}] / rmnd_qty = {format(_to_abs_int(gval.get("rmnd_qty")),',') } / trde_able_qty = {format(_to_abs_int(gval.get("trde_able_qty")),',')} / cur_prc = {format(_to_abs_int(gval.get("cur_prc")),',')}")            
+
+            if(b_Test == True):
+                break
+            time.sleep(float_timeout)
+
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]몽땅완료!")       
 
 if __name__ == "__main__":

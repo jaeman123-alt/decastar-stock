@@ -35,7 +35,7 @@ float_poll: float = 1       #    ap.add_argument("--poll", type=float, default=1
 float_timeout: float = 30   #    ap.add_argument("--timeout", type=int, default=30, help="매수 체결 대기 타임아웃(초)")        
 bool_check: bool = False     #    ap.add_argument("--check", action="store_true", help="있으면 대상 종목확인 / 없으면 실행")
 
-b_Tprint: bool = False # 요건 tprint 도 출력되도록 설정
+b_Tprint: bool = True # 요건 tprint 도 출력되도록 설정
 b_Test: bool = False # 요건 TEST 모드 장마감 후 에도 진행 test 설정
 
 b_JMKEY: bool = False #True # JM 계좌 사용

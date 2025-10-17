@@ -179,7 +179,6 @@ class KiwoomClient:
                 ord_no = "매도주문 응답에 주문번호가 없습니다:"
         
         return ord_no
-
     
     def place_sell_market(self, stk_cd: str, qty: int) -> str:
         tcode = stk_cd.replace("A", "") 
@@ -532,26 +531,32 @@ class KiwoomClient:
         tprint(f"get_my_all_stock -> {stock_cnt}")
 
         t_qty = 0
-        sell_no = None
-        
+        sell_no = None               
 
         # 잔고에서 매도 주문 실행
+        # 계좌에 있는지 확인        
         for stock in balance_info:
             tcode = stock['stk_cd'].replace("A", "") 
             tprint(f"balance_info Check -> {tcode} == {stk_cd}) / t_qyt = {t_qty}")
             if int(tcode == stk_cd):                
                 t_qty = int(stock['trde_able_qty'])
                 tprint(f"place_loss_cut_sell -> {tcode} == {stk_cd}) / t_qyt = {t_qty}")
-                break
+                if t_qty > 0:  # 매도 가능한 수량이 있는 경우
+                    sell_no = self.place_sell_market(stk_cd, t_qty)
+                    print(f"place_loss_cut_sell -> sell_no - [{tcode}] / t_qyt = {t_qty} / {sell_no}")
+                    tprint(f"sell_no{sell_no}")
+                    
+                else:
+                    # 종목은 있으나 매도 가능 수량이 0
+                    # 이미 예약 되어 있는 경우이니
+                    # 걍 나가자
+                    sell_no = None
+                    print(f"매도 가능수량이 없습니다  -> sell_no - [{tcode}] / t_qyt = {t_qty} / {sell_no}")                    
 
-        if t_qty > 0:  # 매도 가능한 수량이 있는 경우
-            sell_no = self.place_sell_market(stk_cd, t_qty)
-            tprint(f"place_loss_cut_sell -> sell_no - [{sell_no}] / {tcode} == {stk_cd}) / t_qyt = {t_qty}")
-            tprint(f"sell_no{sell_no}")
             time.sleep(1)
+            break        
 
-        #여기서 채결 확인을 할지 걍 넘어갈지...일단은 걍 넘어가 보자
-        
+        #여기서 채결 확인을 할지 걍 넘어갈지...일단은 걍 넘어가 보자        
         return {                    
             "stock_cnt": stock_cnt,
             "sell_ord_no": sell_no,
