@@ -22,7 +22,7 @@ from tools import * #요건 공통 함수
 start_time: str = "00:00" # 00:00 일 경우 바로 시작
 
 #전체 잔고 매도 주문 시도 시간
-sell_all_time1: str = "15:25"
+sell_all_time1: str = "15:20"
 
 lim_price: int = 150000 # 비싼 건 넘기자고 
 
@@ -261,11 +261,11 @@ def main():
         #sell_price -> tp_price = 0 이기 때문에 실패로 보고 buy_avg_price 가 None이 아니라면 buy_avg 가 있으면 실제 구매가 발생 취소해야함.
         if(result['sell_price'] != 0 or b_Test == True):            
             if(b_Test == True) :
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] No{loop_su}.종목 [{stk_nm}][{store_code}] / 채결가 {now_price} 익절예약가 {(now_price + (now_price * (float_tp/100)))}  / 주문번호 [{result['buy_ord_no']}] TEST")
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] No{loop_su}.종목 [{stk_nm}][{store_code}] / 채결가 {now_price} 익절예약가 {(now_price + (now_price * (float_tp/100)))}  / 주문번호 [{result['buy_ord_no']}] TEST\n")
                 target_rows.append((store_code, stk_nm, now_price, result['sell_ord_no'])) # 조건 통과 → 채택
                 old_price.append(now_price)
             else:
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] No{loop_su}.종목 [{stk_nm}][{store_code}] / 채결가 {result['buy_avg_price']:,} 익절예약가 {result['sell_price']:,} / 주문번호 [{result['buy_ord_no']}]")
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] No{loop_su}.종목 [{stk_nm}][{store_code}] / 채결가 {result['buy_avg_price']:,} 익절예약가 {result['sell_price']:,} / 주문번호 [{result['buy_ord_no']}]\n")
                 target_rows.append((store_code, stk_nm, result['buy_avg_price'], result['sell_ord_no'])) # 조건 통과 → 채택
                 old_price.append(result['buy_avg_price'])
         else:
@@ -282,12 +282,13 @@ def main():
     
     mystock = [] 
     loop_su = 0
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]target_rows - 대상 종목 수 : [{len(target_rows)}]")     
     for stk_cd, stk_nm, resistance, strength in target_rows:  # strength 주문번호로 사용
         store_code = stk_cd
         loop_su = loop_su + 1
         cur_p = format(_to_abs_int(resistance),',')            
-        mystock.append(store_code)
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]target_rows - No{loop_su}. 대상 종목 : [{stk_nm}][{store_code}] / 주문번호 [{strength}] / 평균매수가격 {cur_p}")     
+        mystock.append(store_code)        
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]대상 종목 {loop_su}.: [{stk_nm}][{store_code}]  / 평균매수가격 [{cur_p}] / 주문번호 [{strength}]")     
 
     #손절을 위한 모니터링 시작하기
     print(f"\n+++++++++ [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 모니터링 시작\n")
@@ -343,7 +344,7 @@ def main():
                         break
                 else:
                     #이미 리스트에서 삭제 되었음으로 삭제
-                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]모니터링 {loopcnt}회] 대상 종목 {loop_su}.  : [{stk_nm}][{store_code}] 이미 리스트에서 삭제 되었음으로 삭제\n")  
+                    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][모니터링 {loopcnt}회] 대상 종목 {loop_su}.  : [{stk_nm}][{store_code}] 이미 리스트에서 삭제 되었음으로 삭제\n")  
                     uncnt = uncnt + 1 #상태를 모르니 모름 카운트
                     go_or_stop[loop_su - 1] = 0 
                     break
@@ -363,9 +364,8 @@ def main():
                 p_tp = format(_to_abs_int(tp),',')
                 p_sl = format(_to_abs_int(sl),',') 
 
-                #print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] No{loop_su}.종목 [{store_code}] : [{stk_nm}] ")
-                clear_prev_lines(1)
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]모니터링 {loopcnt}회] 대상 종목 {loop_su}.  : [{stk_nm}][{store_code}] 지금 가격: {p_last} / 구매 금액 {p_old_p} 익절 : {p_tp} 까지 {int(tp-last)} 손절 : {p_sl} 까지 {int(sl-last)}") 
+                #print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] No{loop_su}.종목 [{store_code}] : [{stk_nm}] ")                
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][모니터링 {loopcnt}회] 대상 종목 {loop_su}.  : [{stk_nm}][{store_code}] 지금 가격: {p_last} / 구매 금액 {p_old_p} 익절 : {p_tp} 까지 {int(tp-last)} 손절 : {p_sl} 까지 {int(sl-last)}") 
                 if last == 0 :
                     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]대상 종목 {loop_su}. : [{stk_nm}][{store_code}] 가격 읽기 오류 [모니터링 {loopcnt}회]\n")
                     continue
@@ -377,9 +377,8 @@ def main():
                         go_or_stop[loop_su - 1] = 0   
 
                     else :                        
-                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]대상 종목 {loop_su}. : [{stk_nm}][{store_code}] 목표가 도달({p_last} ≥ {p_tp}) → 전량 시장가 손절 매도 시도 / 보유 종목수 {my_stock_cnt}\n")
-
-                        ret_val = client.place_loss_cut_sell(buy_ord_no = strength, stk_cd = store_code)   
+                        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]대상 종목 {loop_su}. : [{stk_nm}][{store_code}] 목표가 도달({p_last} ≥ {p_tp}) → 전량 시장가 손절 매도 시도 / 보유 종목수 {my_stock_cnt}")
+                        ret_val = client.place_loss_cut_sell(buy_ord_no = strength, stk_cd = store_code)
                         
                         if(b_Test == True):
                             my_stock_cnt = my_stock_cnt - 1
@@ -388,13 +387,13 @@ def main():
 
                         tprint(f"ret_val = {ret_val} / stock_cnt = {ret_val['stock_cnt']} / sell_ord_no = {ret_val['sell_ord_no']}")
                         if ret_val['sell_ord_no'] is None:
-                            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]대상 종목 {loop_su}. : [{stk_nm}][{store_code}] 주문 실패 했어요 잔고 확인해봐요! 재 시도 해볼께요 / 보유 종목수 {my_stock_cnt}\n")
+                            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]대상 종목 {loop_su}. : [{stk_nm}][{store_code}] 주문 실패 했어요 잔고 확인해봐요! 재 시도 해볼께요 / 보유 종목수 {my_stock_cnt}\n\n")
                         else:
-                            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]대상 종목 {loop_su}. : [{stk_nm}][{store_code}] 매도 주문 완료 모니터링 종료! 주문번호 {ret_val['sell_ord_no']} / 매도수량 {qty} / 보유 종목수 {my_stock_cnt}\n")    
+                            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]대상 종목 {loop_su}. : [{stk_nm}][{store_code}] 매도 주문 완료 모니터링 종료! 주문번호 {ret_val['sell_ord_no']} / 매도수량 {qty} / 보유 종목수 {my_stock_cnt}\n\n")
                             slcnt = slcnt + 1
                             go_or_stop[loop_su - 1] = 0   
 
-                #clear_prev_lines(1) # 겹쳐 쓰기 위로       
+                clear_prev_lines(1) # 겹쳐 쓰기 위로 
 
         # 1) 나의 계좌를 보자 / 계좌에 없으면서 go_or_stop 가 1 이면 0 으로 바꿔서 더이상 모니터링 하지 않도록 해 주자
         balance_info = client.get_my_all_stock()
@@ -407,20 +406,19 @@ def main():
             mystock.append(gval.get("stk_cd").replace("A", ""))            
             tprint(f"{mystock}")
 
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]모니터링 {loopcnt}회] 완료. 모니터링 종목 수 {my_stock_cnt} \n")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][모니터링 {loopcnt}회] 완료. 모니터링 종목 수 {my_stock_cnt} \n")
         tprint(f"M get_my_all_stock -> {my_stock_cnt}")
         if(my_stock_cnt <= 0):
             break        
 
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]매매 루프를 다 돌았다. \n전체 {target_ea} 개 = [익절 {tpcnt}개] + [손절 {slcnt}개] + [모름 {uncnt}]개 + [모니터링중 {my_stock_cnt}]\n")
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]매매 루프를 다 돌았다. \n전체 {target_ea} 개 = [익절 {tpcnt}개] + [손절 {slcnt}개] + [모름 {uncnt}]개 + [계좌에 남은 종목 수 {my_stock_cnt}]\n")
 
-    #모니터링중인 종목들 정리
+    #계좌에 남은 종목들 정리
     #루프 15번 넘으면 그만
     loop_su = 0    
     if(my_stock_cnt > 0):        
         while True:
             loop_su = loop_su + 1
-
             if(loop_su > int_MaxLoop):
                 break
 
