@@ -44,6 +44,8 @@ b_MeMe: bool = True #False #True # 매매 대상을 표시 해줌
 int_resol_code: int = 10 #예비로 더 읽어 올 종목수
 int_pick_code: int = 2 #1:JM 2:CY1 3:CY2
 
+int_MaxLoop: int = 15  #최종 Maxloop 수
+
 #예약 기다리는 함수
 def wait_until(hhmm: str) -> None:
 
@@ -413,10 +415,15 @@ def main():
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]매매 루프를 다 돌았다. \n전체 {target_ea} 개 = [익절 {tpcnt}개] + [손절 {slcnt}개] + [모름 {uncnt}]개 + [모니터링중 {my_stock_cnt}]\n")
 
     #모니터링중인 종목들 정리
-    if(my_stock_cnt > 0):
-        loop_su = 0    
+    #루프 15번 넘으면 그만
+    loop_su = 0    
+    if(my_stock_cnt > 0):        
         while True:
             loop_su = loop_su + 1
+
+            if(loop_su > int_MaxLoop):
+                break
+
             result = client.place_market_sell_all(            
                     poll_sec=float_poll,
                     timeout_sec=float_timeout,
@@ -437,7 +444,7 @@ def main():
                 break
             time.sleep(float_timeout)
 
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]몽땅완료!")       
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]몽땅완료!")
 
 if __name__ == "__main__":
     main()
