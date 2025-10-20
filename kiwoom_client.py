@@ -898,7 +898,7 @@ class KiwoomClient:
         return final_candidates
         """    
 
-# ----------------------------------------------------
+    # ----------------------------------------------------
     # 종목 선정
     # ETF + ETN 제외, 거래대금 100억 이상, 거래량 20~50만주 이상, 갭 상승 돌파 제외
     # ----------------------------------------------------
@@ -984,5 +984,152 @@ class KiwoomClient:
         #return [item['stk_cd'] for item in final_list]
 
 
+"""
+
+    # 거래대금 상위 종목 조회
+    def get_trde_prica_upper(self) -> list[tuple[str, str, str, str]]:
+    
+        body = {
+            "mrkt_tp": "000",          # 000:전체, 001:코스피, 101:코스닥
+            "mang_stk_incls": "0",     # 0:관리종목 미포함, 1:관리종목 포함
+            "stex_tp": "1"             # 1:KRX, 2:NXT 3.통합
+        }
+
+        data = self._post("/api/dostk/rkinfo", api_id="ka10032", body=body)
+
+        if data.get("return_code") == 0:
+            top_stocks = data.get("trde_prica_upper", [])
+            
+            print(f"### 거래대금 상위 종목 : {len(top_stocks)}개 검색됨:")
+            
+            for stock in top_stocks:
+                print(
+                    f"순위: {top_stocks.index(stock) + 1}, "
+                    f"종목명: {stock.get('stk_nm')}, "
+                    f"코드: {stock.get('stk_cd')}, "
+                    f"현재순위: {stock.get('now_rank')}"
+                )
+            
+            return top_stocks
+
+        else:
+            print(f"API 요청 실패: {data.get('return_msg')}")
+            return None
+    
+
+    # 주식 기본 정보 요청 - 시가총액 3천억~10조 사이
+    def get_stk_cd_basic_info(self, code) -> list[tuple[str, str, str, str]]:
+    
+        # 시가총액 필터 기준 (단위: 백만 원 가정)
+        MIN_CAP_KRW = 300_000_000_000
+        MAX_CAP_KRW = 10_000_000_000_000
+        UNIT_SCALE = 1_000_000 # 100만 원 (백만 원)
+
+        MIN_CAP_API_UNIT = MIN_CAP_KRW / UNIT_SCALE # 300,000 (백만 원)
+        MAX_CAP_API_UNIT = MAX_CAP_KRW / UNIT_SCALE # 10,000,000 (백만 원)
+
+        body = {
+            'stk_cd': code  # 거래소별 종목코드 (KRX:039490,NXT:039490_NX,SOR:039490_AL)
+        }
+
+        data = self._post("/api/dostk/stkinfo", api_id="ka10001", body=body)
+
+        if data.get("return_code") == 0:
+            top_stocks = data.get("pred_trde_qty_upper", [])
+            
+            print("--- 전일 거래량 상위 50개 종목 조회 결과 ---")
+            
+            # stk_cd: 종목코드, stk_nm: 종목명, cur_prc: 현재가, trde_qty: 거래량
+            for stock in top_stocks:
+                print(
+                    f"순위: {top_stocks.index(stock) + 1}, "
+                    f"종목명: {stock.get('stk_nm')}, "
+                    f"코드: {stock.get('stk_cd')}, "
+                    f"거래량: {stock.get('trde_qty')}"
+                )
+            
+            return top_stocks
+
+        else:
+            print(f"API 요청 실패: {data.get('return_msg')}")
+            return None    
+
+    # ----------------------------------------------------
+    # 종목 선정
+    # 
+    # 1. 거래대금 상위 종목 검색 - ETF, ETN, 우선주 제외
+    # 2. 시가총액 3천억 ~ 10조 사이
+    # 3. 공매도 잔고수량 비율 높은지 확인하고 제외 (5%이상)
+    # 4. 전일 종가 대비 시작가가 1%이상 하락 종목 제외
+    # ----------------------------------------------------
+
+    def get_stocks_code_mumber2(self, max_limit) -> list[tuple[str, str, str, str]]:
+        
+        selected_stocks = []
+
+        candidates = self.get_trde_prica_upper()
 
 
+        print(f"## 1차 필터링 통과 종목 수: {len(candidates)}개. 2차 검증 시작...\n")
+        
+        for stock in candidates:
+            stk_cd = stock.get('stk_cd')
+            stk_nm = stock.get('stk_nm')
+            
+            # 2. 2차 검증: 기술적/심리적 필터 적용
+            
+            # 2-1. 체결 강도 확인 (실시간 매수세)            
+            strength = self.check_contract_strength(stk_cd)
+            time.sleep(1)
+            if strength < 120.0:  # 체결강도 120은 매수세가 매도세보다 20% 강하다는 뜻이지만, 100은 중간이라, 하락 추세 위험이 높다.             
+                #clear_prev_lines(1) # 겹쳐 쓰기 1줄 위로
+                print(f"제외: [{stk_nm}] 체결 강도 {strength:.2f} (120 미만)")                
+                continue # 체결강도 120 이상인 종목만 추적
+
+            # 2-2. 갭 상승 저항 돌파 여부 확인 (리스크 관리)
+            
+            # A. 시가 및 전일 종가 조회 
+            data, success = self.get_stock_market_data(stk_cd)
+            time.sleep(1)
+        
+            if not success or data['open_pric'] == 0:
+                return True, "조회 실패 또는 장 시작 전."
+
+            open_pric = data['open_pric']  #시가
+            pred_close_pric = data['pred_close_pric']  #전일 종가
+
+            # B. 최근 신고가 (저항선) 조회
+            recent_high = self.get_recent_high_price(stk_cd, period="060") # 60일 신고가를 저항선으로 사용
+            time.sleep(1)
+            resistance_price = max(pred_close_pric, recent_high) # 전일 종가와 60일 신고가 중 높은 것을 저항으로 설정
+
+            # C. 갭 상승 및 저항 돌파 판단
+            is_gap_up = open_pric > pred_close_pric
+            if is_gap_up and open_pric >= resistance_price * 0.995: # 0.5% 이내 근접하여 돌파했다고 판단
+                # 단타 매매 원칙: 갭 상승으로 이미 저항을 돌파한 종목은 매수하지 않는다
+                #clear_prev_lines(1) # 겹쳐 쓰기 1줄 위로
+                print(f"제외: [{stk_nm}] 갭 상승 및 저항 돌파 (시가: {open_pric:,.0f}, 저항: {resistance_price:,.0f})")
+                continue 
+
+            # 3. 최종 선정
+            selected_stocks.append({
+                "stk_cd": stk_cd,
+                "stk_nm": stk_nm,
+                "strength": strength,
+                "resistance": resistance_price
+            })
+
+            #if len(selected_stocks) >= max_limit:
+            #    break
+                
+        # 최종 결과 정리 (체결강도 순으로 정렬)
+        final_list = sorted(selected_stocks, key=lambda x: x['strength'], reverse=True)
+        
+        print("\n========= 최종 선정된 단타 주도주 리스트 =========")
+        for i, item in enumerate(final_list):
+            print(f"순위 {i+1}: {item['stk_nm']} ({item['stk_cd']}) | 체결강도: {item['strength']:.2f} | 저항가격: {item['resistance']:}")
+
+        return [(item['stk_cd'], item['stk_nm'], item['resistance'], item['strength']) for item in final_list[:max_limit]]
+        #return [item['stk_cd'] for item in final_list]
+
+"""
