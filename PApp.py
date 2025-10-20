@@ -362,6 +362,7 @@ def main():
                 p_sl = format(_to_abs_int(sl),',') 
 
                 #print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] No{loop_su}.종목 [{store_code}] : [{stk_nm}] ")
+                clear_prev_lines(1)
                 print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]모니터링 {loopcnt}회] 대상 종목 {loop_su}.  : [{stk_nm}][{store_code}] 지금 가격: {p_last} / 구매 금액 {p_old_p} 익절 : {p_tp} 까지 {int(tp-last)} 손절 : {p_sl} 까지 {int(sl-last)}") 
                 if last == 0 :
                     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]대상 종목 {loop_su}. : [{stk_nm}][{store_code}] 가격 읽기 오류 [모니터링 {loopcnt}회]\n")
@@ -404,11 +405,10 @@ def main():
             mystock.append(gval.get("stk_cd").replace("A", ""))            
             tprint(f"{mystock}")
 
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]모니터링 {loopcnt}회] 완료. 모니터링 종목 수 {my_stock_cnt} \n")
         tprint(f"M get_my_all_stock -> {my_stock_cnt}")
         if(my_stock_cnt <= 0):
             break        
-
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]모니터링 {loopcnt}회] 완료. 모니터링 종목 수 {my_stock_cnt} \n")
 
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]매매 루프를 다 돌았다. \n전체 {target_ea} 개 = [익절 {tpcnt}개] + [손절 {slcnt}개] + [모름 {uncnt}]개 + [모니터링중 {my_stock_cnt}]\n")
 

@@ -526,7 +526,7 @@ class KiwoomClient:
         # 1) 모두 팔아! 매도 주문 접수
         ret_no = self.place_sell_order_cancel(buy_ord_no, stk_cd, qty) 
         time.sleep(1)
-        print(f"place_sell_order_cancel = {ret_no}")
+        tprint(f"place_sell_order_cancel = {ret_no}")
 
         # 1) 나의 계좌를 보자
         balance_info = self.get_my_all_stock()
@@ -534,7 +534,7 @@ class KiwoomClient:
         tprint(balance_info)
         stock_cnt = len(balance_info)
 
-        print(f"get_my_all_stock -> {stock_cnt}")
+        tprint(f"get_my_all_stock -> {stock_cnt}")
 
         t_qty = 0
         sell_no = None               
@@ -557,7 +557,7 @@ class KiwoomClient:
                     # 이미 예약 되어 있는 경우이니
                     # 걍 나가자
                     sell_no = None
-                    print(f"place_loss_cut_sell 매도 가능수량이 없습니다 -> tcode - [{tcode}] / t_qyt = {t_qty} / sell_no = {sell_no}")
+                    tprint(f"place_loss_cut_sell 매도 가능수량이 없습니다 -> tcode - [{tcode}] / t_qyt = {t_qty} / sell_no = {sell_no}")
 
                 break
 
