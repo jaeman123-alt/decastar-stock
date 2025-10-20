@@ -149,8 +149,6 @@ def main():
     else:
         wait_until(start_time)
 
-    
-
     #보유 주식 정리 ( TEST 에서 시작하기전에 비우고 시작하기 위해 )
     balance_info = client.get_my_all_stock()  
     time.sleep(1)  
@@ -180,8 +178,6 @@ def main():
         
         time.sleep(float_timeout)
 
-
-
     cur_entr = client.get_current_entr()  
 
     target_ea = int_ea
@@ -203,18 +199,25 @@ def main():
             rows = client.get_stoke_code(float_tp) # 요청 보다 등락율이 익절 값보다 커야 뽑아 옴
         case 3:
             rows = client.get_stoke_code_yesterday(float_tp) # 요청 보다 등락율이 익절 값보다 커야 뽑아 옴
-            
-    if(b_JMMode == True):
-        return
 
+    
     #code 시장가로 구매하고 구매금 + 익절가 에 예약 매도 넣기
     loop_su = 0
     old_price = []
     go_or_stop = []
     mystock = []    
     
+    #row 후보 종목은 일단 다 보여주자
+    for stk_cd, stk_nm, resistance, strength in rows:           
+        loop_su = loop_su + 1
+        print(f"[후보 종목 {loop_su}. : {stk_nm}][{stk_cd}] 기준1 = {resistance} / 기준2 = {strength}")
+            
+    if(b_JMMode == True):
+        return
+    
     target_rows: list[tuple[str, str, str, str]] = []   
 
+    loop_su = 0
     for stk_cd, stk_nm, resistance, strength in rows:           
         loop_su = loop_su + 1
 
@@ -359,7 +362,7 @@ def main():
                 p_sl = format(_to_abs_int(sl),',') 
 
                 #print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] No{loop_su}.종목 [{store_code}] : [{stk_nm}] ")
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]모니터링 {loopcnt}회] 대상 종목 {loop_su}.  : [{stk_nm}][{store_code}] 지금 가격: {p_last} / 구매 금액 {p_old_p} 익절 : {p_tp} 손절 : {p_sl}")                
+                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]모니터링 {loopcnt}회] 대상 종목 {loop_su}.  : [{stk_nm}][{store_code}] 지금 가격: {p_last} / 구매 금액 {p_old_p} 익절 : {p_tp} 까지 {int(tp-last)} 손절 : {p_sl} 까지 {int(sl-last)}") 
                 if last == 0 :
                     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]대상 종목 {loop_su}. : [{stk_nm}][{store_code}] 가격 읽기 오류 [모니터링 {loopcnt}회]\n")
                     continue
@@ -380,7 +383,8 @@ def main():
                         else:
                             my_stock_cnt = ret_val['stock_cnt']
 
-                        if ret_val['sell_ord_no'] is None or b_Test != True:
+                        tprint(f"ret_val = {ret_val} / stock_cnt = {ret_val['stock_cnt']} / sell_ord_no = {ret_val['sell_ord_no']}")
+                        if ret_val['sell_ord_no'] is None:
                             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]대상 종목 {loop_su}. : [{stk_nm}][{store_code}] 주문 실패 했어요 잔고 확인해봐요! 재 시도 해볼께요 / 보유 종목수 {my_stock_cnt}\n")
                         else:
                             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]대상 종목 {loop_su}. : [{stk_nm}][{store_code}] 매도 주문 완료 모니터링 종료! 주문번호 {ret_val['sell_ord_no']} / 매도수량 {qty} / 보유 종목수 {my_stock_cnt}\n")    

@@ -417,9 +417,15 @@ class KiwoomClient:
             while time.time() < deadline2:
                 loop_su1 = loop_su1 + 1
                 sell_ord_no = self.place_sell_limit(stk_cd=stk_cd, qty=buy_ord_qty, price=tp_price)                
-                if sell_ord_no is None or sell_ord_no.__contains__("실패"):
-                    print(f"[익절 지정가 매도 접수 실패][재시도 {loop_su1} 회] 종목:[{stk_cd}] 수량:[{buy_ord_qty}] 가격:[{tp_price}] / {sell_ord_no} ")
-                    tp_price = 0 #취소하도록
+                if sell_ord_no is None or sell_ord_no.__contains__("실패"):                    
+                    if(sell_ord_no.__contains__("아는 오류")):
+                        print(f"[익절 지정가 매도 접수 실패][재시도 {loop_su1} 회] 종목:[{stk_cd}] 수량:[{buy_ord_qty}] 가격:[{tp_price}] / {sell_ord_no} ")
+                        tp_price = 0 #취소하도록 
+                        break #아는 오류임으로 재시도 없이 나가자
+                    else:
+                        print(f"[익절 지정가 매도 접수 실패][재시도 {loop_su1} 회] 종목:[{stk_cd}] 수량:[{buy_ord_qty}] 가격:[{tp_price}] / {sell_ord_no} ")
+                        tp_price = 0 #취소하도록
+                    
                 else:
                     print(f"[익절 지정가 매도 OK] 종목:[{stk_cd}] 수량:[{buy_ord_qty}] 가격:[{tp_price}] / {sell_ord_no} ")
                     break
@@ -520,7 +526,7 @@ class KiwoomClient:
         # 1) 모두 팔아! 매도 주문 접수
         ret_no = self.place_sell_order_cancel(buy_ord_no, stk_cd, qty) 
         time.sleep(1)
-        tprint(f"place_sell_order_cancel = {ret_no}")
+        print(f"place_sell_order_cancel = {ret_no}")
 
         # 1) 나의 계좌를 보자
         balance_info = self.get_my_all_stock()
@@ -528,7 +534,7 @@ class KiwoomClient:
         tprint(balance_info)
         stock_cnt = len(balance_info)
 
-        tprint(f"get_my_all_stock -> {stock_cnt}")
+        print(f"get_my_all_stock -> {stock_cnt}")
 
         t_qty = 0
         sell_no = None               
@@ -542,8 +548,8 @@ class KiwoomClient:
                 t_qty = int(stock['trde_able_qty'])
                 tprint(f"place_loss_cut_sell -> {tcode} == {stk_cd}) / t_qyt = {t_qty}")
                 if t_qty > 0:  # 매도 가능한 수량이 있는 경우
-                    sell_no = self.place_sell_market(stk_cd, t_qty)
-                    print(f"place_loss_cut_sell -> sell_no - [{tcode}] / t_qyt = {t_qty} / {sell_no}")
+                    sell_no = self.place_sell_market(tcode, t_qty)
+                    tprint(f"place_loss_cut_sell -> tcode - [{tcode}] / t_qyt = {t_qty} / sell_no = {sell_no}")
                     tprint(f"sell_no{sell_no}")
                     
                 else:
@@ -551,10 +557,11 @@ class KiwoomClient:
                     # 이미 예약 되어 있는 경우이니
                     # 걍 나가자
                     sell_no = None
-                    print(f"매도 가능수량이 없습니다  -> sell_no - [{tcode}] / t_qyt = {t_qty} / {sell_no}")                    
+                    print(f"place_loss_cut_sell 매도 가능수량이 없습니다 -> tcode - [{tcode}] / t_qyt = {t_qty} / sell_no = {sell_no}")
+
+                break
 
             time.sleep(1)
-            break        
 
         #여기서 채결 확인을 할지 걍 넘어갈지...일단은 걍 넘어가 보자        
         return {                    
