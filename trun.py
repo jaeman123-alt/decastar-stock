@@ -146,14 +146,14 @@ def main():
     tprint(balance_info)
     print(f"보유 종목 수는 {len(balance_info)} 입니다.")
     
-
+    cur_entr = client.get_current_entr()
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]니 계좌에서 구매 가능한 돈 : {format(cur_entr, ',')}원 ")
     #보유 주식 정리 ( TEST 에서 시작하기전에 비우고 시작하기 위해 )
     balance_info = client.get_my_all_stock()    
     time.sleep(1)
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]보유 종목 수는 {len(balance_info)} 입니다.")
     
     ret_val = client.place_market_sell_all()
-
     print(f"client.place_market_sell_all = {ret_val}")
 
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]몽땅완료!")

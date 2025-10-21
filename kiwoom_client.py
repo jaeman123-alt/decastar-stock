@@ -524,10 +524,12 @@ class KiwoomClient:
         
         ret_no = 0 #숫자가 있으면 타임아웃으로 나온거임 0 이 맞는 값
         deadline = time.time() + timeout_sec + poll_sec + poll_sec + poll_sec + poll_sec 
-        loop_su = 0    
+        loop_su = 0            
         while time.time() < deadline:
+            tprint(f"deadline - {deadline} / {time.time()}")
             loop_su = loop_su + 1
-            if(loop_out > loop_su):
+            if(loop_out < loop_su):
+                tprint(f"loop_out - {loop_out} / loop_su - {loop_su}")
                 break
 
             # 1) 모두 팔아! 매도 주문 접수
@@ -538,6 +540,7 @@ class KiwoomClient:
             tprint(f"보유 종목 수는 {ret_no} 입니다.")
 
             if(ret_no == 0):
+                tprint(f"ret_no - {ret_no}")
                 break
 
             result = self.get_order_List()
@@ -560,7 +563,7 @@ class KiwoomClient:
                 tprint(f"place_market_sell_all -> stk_cd = {stock['stk_cd']} / trde_able_qty = {int(stock['trde_able_qty'])}")
                 sell_no = self.place_sell_market(stock['stk_cd'], 0)
                 if(sell_no.__contains__("없습니다")):
-                    print(f"place_sell_market 실패한 것으로 보임 -> {sell_no}")           
+                    print(f"place_sell_market [{stock['stk_cd']}][{stock['stk_nm']}]실패한 것으로 보임 -> {sell_no}")           
                 else:
                     ret_no = ret_no + 1
                 time.sleep(poll_sec)

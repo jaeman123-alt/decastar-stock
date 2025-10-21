@@ -392,6 +392,9 @@ def main():
     #보유 주식 정리 ( TEST 에서 시작하기전에 비우고 시작하기 위해 )
     ret_val = client.place_market_sell_all(float_poll,float_timeout,int_MaxLoop)
     print(f"보유 종목 수는 {ret_val} 입니다.")
+
+    cur_entr = client.get_current_entr()          
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]니 계좌에서 구매 가능한 돈 : {format(cur_entr, ',')}원 ")
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]몽땅완료!")
 
 if __name__ == "__main__":
