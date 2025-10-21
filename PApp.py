@@ -152,33 +152,8 @@ def main():
         wait_until(start_time)
 
     #보유 주식 정리 ( TEST 에서 시작하기전에 비우고 시작하기 위해 )
-    balance_info = client.get_my_all_stock()  
-    time.sleep(1)  
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]보유 종목 수는 {len(balance_info)} 입니다.")
-    
-    loop_su = 0    
-    while True:
-        loop_su = loop_su + 1
-        result = client.place_market_sell_all(            
-                poll_sec=float_poll,
-                timeout_sec=float_timeout,
-        )        
-        time.sleep(1)
-        
-        balance_info = client.get_my_all_stock()   
-        time.sleep(1)            
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][{loop_su}]보유 종목 수는 {len(balance_info)} 입니다.")
-
-        if(len(balance_info) == 0): 
-            break
-
-        for gval in balance_info :            
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][{loop_su}][{gval.get("stk_cd")} / {gval.get("stk_nm")}] / rmnd_qty = {format(_to_abs_int(gval.get("rmnd_qty")),',') } / trde_able_qty = {format(_to_abs_int(gval.get("trde_able_qty")),',')} / cur_prc = {format(_to_abs_int(gval.get("cur_prc")),',')}")            
-
-        if(b_Test == True):
-            break
-        
-        time.sleep(float_timeout)
+    ret_val = client.place_market_sell_all(float_poll,float_timeout,int_MaxLoop)
+    print(f"보유 종목 수는 {ret_val} 입니다.")
 
     cur_entr = client.get_current_entr()  
 
@@ -414,34 +389,9 @@ def main():
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]매매 루프를 다 돌았다. \n전체 {target_ea} 개 = [익절 {tpcnt}개] + [손절 {slcnt}개] + [모름 {uncnt}]개 + [계좌에 남은 종목 수 {my_stock_cnt}]\n")
 
     #계좌에 남은 종목들 정리
-    #루프 15번 넘으면 그만
-    loop_su = 0    
-    if(my_stock_cnt > 0):        
-        while True:
-            loop_su = loop_su + 1
-            if(loop_su > int_MaxLoop):
-                break
-
-            result = client.place_market_sell_all(            
-                    poll_sec=float_poll,
-                    timeout_sec=float_timeout,
-            )        
-            time.sleep(1)
-            
-            balance_info = client.get_my_all_stock()   
-            time.sleep(1)            
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][{loop_su}]보유 종목 수는 {len(balance_info)} 입니다.")
-
-            if(len(balance_info) == 0): 
-                break
-
-            for gval in balance_info :            
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][{loop_su}][{gval.get("stk_cd")} / {gval.get("stk_nm")}] / rmnd_qty = {format(_to_abs_int(gval.get("rmnd_qty")),',') } / trde_able_qty = {format(_to_abs_int(gval.get("trde_able_qty")),',')} / cur_prc = {format(_to_abs_int(gval.get("cur_prc")),',')}")            
-
-            if(b_Test == True):
-                break
-            time.sleep(float_timeout)
-
+    #보유 주식 정리 ( TEST 에서 시작하기전에 비우고 시작하기 위해 )
+    ret_val = client.place_market_sell_all(float_poll,float_timeout,int_MaxLoop)
+    print(f"보유 종목 수는 {ret_val} 입니다.")
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]몽땅완료!")
 
 if __name__ == "__main__":

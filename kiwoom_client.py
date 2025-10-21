@@ -481,7 +481,7 @@ class KiwoomClient:
             "sell_price": tp_price,
         }
 
-    def place_market_sell_all(
+    def place_market_sell_all2(
         self,    
         poll_sec: float = 1.0,
         timeout_sec: int = 3,
@@ -512,6 +512,58 @@ class KiwoomClient:
             sell_no = self.place_sell_market(stock['stk_cd'],int(stock['trde_able_qty']))
             tprint(f"sell_no{ret_no}")
             time.sleep(1)
+
+        return ret_no
+    
+    def place_market_sell_all(
+        self,    
+        poll_sec: float = 1.0,
+        timeout_sec: int = 3,
+        loop_out: int = 3,
+    ) -> str:
+        
+        ret_no = 0 #숫자가 있으면 타임아웃으로 나온거임 0 이 맞는 값
+        deadline = time.time() + timeout_sec + poll_sec + poll_sec + poll_sec + poll_sec 
+        loop_su = 0    
+        while time.time() < deadline:
+            loop_su = loop_su + 1
+            if(loop_out > loop_su):
+                break
+
+            # 1) 모두 팔아! 매도 주문 접수
+            balance_info = self.get_my_all_stock()
+            ret_no = len(balance_info)
+            time.sleep(poll_sec)
+            tprint(balance_info)
+            tprint(f"보유 종목 수는 {ret_no} 입니다.")
+
+            if(ret_no == 0):
+                break
+
+            result = self.get_order_List()
+            time.sleep(poll_sec)
+            
+
+            for r in result:    
+                stk_cd = r.get("stk_cd")
+                stk_nm = r.get("stk_nm")
+                ord_no = r.get("ord_no")
+                tprint(f"get_order_List -> {stk_cd} / {stk_nm} / {ord_no}")
+                if(loop_su == 1):
+                    ret_no = self.place_sell_order_cancel(ord_no, stk_cd)                    
+                    tprint(f"place_sell_order_cancel = {ret_no}")
+                
+                time.sleep(poll_sec)        
+    
+            # 잔고에서 시장가 청산 매도 주문 실행
+            for stock in balance_info:
+                tprint(f"place_market_sell_all -> stk_cd = {stock['stk_cd']} / trde_able_qty = {int(stock['trde_able_qty'])}")
+                sell_no = self.place_sell_market(stock['stk_cd'], 0)
+                if(sell_no.__contains__("없습니다")):
+                    print(f"place_sell_market 실패한 것으로 보임 -> {sell_no}")           
+                else:
+                    ret_no = ret_no + 1
+                time.sleep(poll_sec)
 
         return ret_no
     

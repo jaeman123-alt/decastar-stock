@@ -35,7 +35,7 @@ float_poll: float = 1       #    ap.add_argument("--poll", type=float, default=1
 float_timeout: float = 30   #    ap.add_argument("--timeout", type=int, default=30, help="매수 체결 대기 타임아웃(초)")        
 bool_check: bool = False     #    ap.add_argument("--check", action="store_true", help="있으면 대상 종목확인 / 없으면 실행")
 
-b_Tprint: bool = True # 요건 tprint 도 출력되도록 설정
+b_Tprint: bool = False # 요건 tprint 도 출력되도록 설정
 b_Test: bool = False # 요건 TEST 모드 장마감 후 에도 진행 test 설정
 
 b_JMKEY: bool = False #True # JM 계좌 사용
@@ -152,27 +152,9 @@ def main():
     time.sleep(1)
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]보유 종목 수는 {len(balance_info)} 입니다.")
     
-    loop_su = 0    
-    while True:
-        loop_su = loop_su + 1
-        result = client.place_market_sell_all(            
-                poll_sec=float_poll,
-                timeout_sec=float_timeout,
-        )        
-        time.sleep(1)
-        
-        balance_info = client.get_my_all_stock()   
-        time.sleep(1)            
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][{loop_su}]보유 종목 수는 {len(balance_info)} 입니다.")
+    ret_val = client.place_market_sell_all()
 
-        if(len(balance_info) == 0): 
-            break
-
-        for gval in balance_info :            
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][{loop_su}][{gval.get("stk_cd")} / {gval.get("stk_nm")}] / rmnd_qty = {format(_to_abs_int(gval.get("rmnd_qty")),',') } / trde_able_qty = {format(_to_abs_int(gval.get("trde_able_qty")),',')} / cur_prc = {format(_to_abs_int(gval.get("cur_prc")),',')}")            
-
-        time.sleep(float_timeout)
-
+    print(f"client.place_market_sell_all = {ret_val}")
 
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]몽땅완료!")
 
