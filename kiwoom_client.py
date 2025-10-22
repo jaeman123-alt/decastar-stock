@@ -537,7 +537,7 @@ class KiwoomClient:
             ret_no = len(balance_info)
             time.sleep(poll_sec)
             tprint(balance_info)
-            tprint(f"보유 종목 수는 {ret_no} 입니다.")
+            print(f"보유 종목 수는 {ret_no} 입니다.")
 
             if(ret_no == 0):
                 tprint(f"ret_no - {ret_no}")
@@ -551,17 +551,17 @@ class KiwoomClient:
                 stk_cd = r.get("stk_cd")
                 stk_nm = r.get("stk_nm")
                 ord_no = r.get("ord_no")
-                tprint(f"get_order_List -> {stk_cd} / {stk_nm} / {ord_no}")
+                print(f"get_order_List -> {stk_cd} / {stk_nm} / {ord_no}")
                 if(loop_su == 1):
                     ret_no = self.place_sell_order_cancel(ord_no, stk_cd)                    
-                    tprint(f"place_sell_order_cancel = {ret_no}")
+                    print(f"place_sell_order_cancel = {ret_no}")
                 
                 time.sleep(poll_sec)        
     
             # 잔고에서 시장가 청산 매도 주문 실행
             for stock in balance_info:
-                tprint(f"place_market_sell_all -> stk_cd = {stock['stk_cd']} / trde_able_qty = {int(stock['trde_able_qty'])}")
-                sell_no = self.place_sell_market(stock['stk_cd'], 0)
+                print(f"place_market_sell_all -> stk_cd = {stock['stk_cd']} / trde_able_qty = {int(stock['trde_able_qty'])}")
+                sell_no = self.place_sell_market(stock['stk_cd'], int(stock['trde_able_qty']))
                 if(sell_no.__contains__("없습니다")):
                     print(f"place_sell_market [{stock['stk_cd']}][{stock['stk_nm']}]실패한 것으로 보임 -> {sell_no}")           
                 else:
