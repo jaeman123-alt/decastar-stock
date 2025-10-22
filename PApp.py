@@ -2,7 +2,7 @@
 # file: PApp.py
 # version : 5.0.0
 # ===============================
-# python PApp.py
+# python PApp.py | Tee-Object -FilePath 1.txt -Append
 # 밑에 상수를 고쳐서 사용하시요.
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ b_JMKEY: bool = False #True # JM 계좌 사용
 b_JMMode: bool = False #True # 매매 없이 JM 을 위해 종목선정까지만 동작하도록
 
 int_resol_code: int = 10 #예비로 더 읽어 올 종목수
-int_pick_code: int = 2 #1:JM 2:CY1 3:CY2
+int_pick_code: int = 3 #1:JM 2:CY1 3:CY2
 
 int_MaxLoop: int = 15  #최종 Maxloop 수
 
@@ -131,9 +131,9 @@ def main():
         app_secret = os.getenv("KIWOOM_SECRETKEY", "Lu9byXdkRDG7lo5VitPpP83T9NaoSR_X0XLspqIMW5s")
         print("account : jm.lee...# jake.lee #만료일 2026-01-10")
     else:        
-        app_key = os.getenv("KIWOOM_APP_KEY", "NTxi_Z9RZJ69MpW79ALrHKB6aUHp1O51gD1Oz3HCZfk")
-        app_secret = os.getenv("KIWOOM_APP_SECRET", "G0XgpAdbuW5CxmemgCb_OC_FrKEG2fBLnsj3kKQsRs8")
-        print("account : cyKim...#81126449 25-10-10 ~ 26-01-08 김창연 1000만원 #")
+        app_key = os.getenv("KIWOOM_APP_KEY", "wRU2VaDpC0nzCsoLImUrVZTd4UxF_nK92jHqLIHEpbM")
+        app_secret = os.getenv("KIWOOM_APP_SECRET", "_OK1FFhd55TlqKy3OMo1l5vmIyp95YwMBVsXDAWcSaY")
+        print("account : cyKim...#81134836 25-10-22 ~ 26-01-22 김창연 1000만원 #")
         
     auth = KiwoomAuth(app_key, app_secret, BaseURL)    
     time.sleep(1)    
@@ -394,7 +394,7 @@ def main():
 
     cur_entr = client.get_current_entr()          
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]니 계좌에서 구매 가능한 돈 : {format(cur_entr, ',')}원 ")
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]몽땅완료!")
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]몽땅완료!\n")
 
 if __name__ == "__main__":
     main()

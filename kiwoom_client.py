@@ -300,7 +300,7 @@ class KiwoomClient:
         tprint(f"ord_alow_amt : {ret_val}")
         return ret_val
 
-    # 거래량을 보고 종목을 뽑자
+    # 거래회전율 보고 종목을 뽑자
     def get_stoke_code(self, tp) -> list[tuple[str, str, str, str]]:
 
         body = {
@@ -319,6 +319,10 @@ class KiwoomClient:
         ret_val: list[tuple[str,str,str,str]] = []
         
         items = data.get("tdy_trde_qty_upper") or []
+
+#소팅 조건 넣기 체결강도순으로 소팅
+        sorted_items = sorted(items, key=lambda x: float(x["cntr_str"]), reverse=True)
+
         for row in items:
             self.rcode = (row.get("stk_cd") or "").replace("_AL", "") 
             self.rname = row.get("stk_nm")
@@ -333,7 +337,7 @@ class KiwoomClient:
 
         return ret_val    
     
-    # 국내주식 > 순위정보 > 전일대비등락률상위요청(ka10027)
+    # 국내주식 > 순위정보 > 전일대비등락률상위요청(ka10027) 상승폭 / 상하한불포함 / KRX
     def get_stoke_code_yesterday(self, tp) -> list[tuple[str, str, str, str]]:
 
         body = {
@@ -345,14 +349,17 @@ class KiwoomClient:
                 "updown_incls": "0", 	#	상하한포함	String	Y	2	0:불 포함, 1:포함
                 "pric_cnd": "0", 		#	가격조건	String	Y	2	0:전체조회, 1:1천원미만, 2:1천원~2천원, 3:2천원~5천원, 4:5천원~1만원, 5:1만원이상, 8:1천원이상, 10: 1만원미만
                 "trde_prica_cnd": "0", 	#	거래대금조건	String	Y	4	0:전체조회, 3:3천만원이상, 5:5천만원이상, 10:1억원이상, 30:3억원이상, 50:5억원이상, 100:10억원이상, 300:30억원이상, 500:50억원이상, 1000:100억원이상, 3000:300억원이상, 5000:500억원이상
-                "stex_tp": "1", 		#	거래소구분	String	Y	1	1:KRX, 2:NXT 3.통합
+                "stex_tp": "3", 		#	거래소구분	String	Y	1	1:KRX, 2:NXT 3.통합
             }
         data = self._post("/api/dostk/rkinfo", api_id="ka10027", body=body)
 
         ret_val: list[tuple[str,str,str,str]] = []
         
         items = data.get("pred_pre_flu_rt_upper") or []
-        for row in items:
+        #소팅 조건 넣기 체결강도순으로 소팅
+        sorted_items = sorted(items, key=lambda x: float(x["cntr_str"]), reverse=True)
+
+        for row in sorted_items:
             self.rcode = (row.get("stk_cd") or "").replace("_AL", "") 
             self.rname = row.get("stk_nm")
             self.rprice  = row.get("cur_prc")
@@ -361,8 +368,7 @@ class KiwoomClient:
             
             if(int_rflu > (tp*100)): #부호가 제거된 등락률이 상한 포로핏보다 크면 저장하기
                 ret_val.append((self.rcode, self.rname, self.rprice, self.rflu))
-
-            tprint(f"get_stoke_code_yesterday? {self.rcode} / {self.rname} / {self.rprice} / {self.rflu}")
+            tprint(f"get_stoke_code_yesterday? {self.rcode} / {self.rname} / {self.rprice} / {self.rflu} / {float(row["cntr_str"])}")
 
         return ret_val  
 
