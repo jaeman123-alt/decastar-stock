@@ -28,7 +28,7 @@ lim_price: int = 150000 # 비싼 건 넘기자고
 
 int_ea: int = 10            #    ap.add_argument("--ea", type=int, required=True, help="대상 종목수 (잔액 자동 사용)")
 float_tp: float = 4.0       #    ap.add_argument("--tp", type=float, required=True, help="익절 % (매수가 대비)")
-float_sl: float = 2.0       #    ap.add_argument("--sl", type=float, required=True, help="손절 % (매수가 대비)")    
+float_sl: float = 4.0       #    ap.add_argument("--sl", type=float, required=True, help="손절 % (매수가 대비)")    
 float_poll: float = 1       #    ap.add_argument("--poll", type=float, default=1.0, help="체결 폴링 간격(초)")
 float_timeout: float = 30   #    ap.add_argument("--timeout", type=int, default=30, help="매수 체결 대기 타임아웃(초)")        
 bool_check: bool = False     #    ap.add_argument("--check", action="store_true", help="있으면 대상 종목확인 / 없으면 실행")
@@ -38,8 +38,6 @@ b_Test: bool = False # 요건 TEST 모드 장마감 후 에도 진행 test 설�
 
 b_JMKEY: bool = False #True # JM 계좌 사용
 b_JMMode: bool = False #True # 매매 없이 JM 을 위해 종목선정까지만 동작하도록
-
-b_MeMe: bool = True #False #True # 매매 대상을 표시 해줌
 
 int_resol_code: int = 10 #예비로 더 읽어 올 종목수
 int_pick_code: int = 2 #1:JM 2:CY1 3:CY2
@@ -109,8 +107,7 @@ def main():
     global b_Tprint
     global b_Test
     global b_JMKEY
-    global b_JMMode
-    global b_MeMe
+    global b_JMMode    
     global int_resol_code
     global int_pick_code
 
