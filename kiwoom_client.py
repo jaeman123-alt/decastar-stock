@@ -142,19 +142,19 @@ class KiwoomClient:
             ret_code = data.get("return_code")
 
             if ord_no:  # 정상적으로 주문번호를 받음
-                print(f"[✅ 성공] place_sell_limit({stk_cd}) 주문번호: {ord_no}")
+                print(f"[성공] place_sell_limit({stk_cd}) 주문번호: {ord_no}")
                 return ord_no
             
             if ret_msg.__contains__("RC4"):  # 재시도 없이 바로 스킵해 아는 에러 RC4... 오류입니다.
-                msg = f"[❌ 실패] 아는 오류 : code = {ret_code} msg = {ret_msg} / {data} "
+                msg = f"[실패] 아는 오류 : code = {ret_code} msg = {ret_msg} / {data} "
                 return msg                
 
             # 주문번호가 없을 경우
-            print(f"[⚠️ 재시도 {attempt}/{max_retries}] 주문번호 응답이 없습니다. 잠시 대기합니다...")
+            print(f"[재시도 {attempt}/{max_retries}] 주문번호 응답이 없습니다. 잠시 대기합니다...")
             time.sleep(retry_delay)
 
         # 모든 재시도 후에도 실패한 경우
-        msg = f"[❌ 실패] 매도주문 응답에 주문번호가 없습니다: {data}"
+        msg = f"[실패] 매도주문 응답에 주문번호가 없습니다: {data}"
         print(msg)
         return msg
 
@@ -194,10 +194,10 @@ class KiwoomClient:
 
         data = self._post("/api/dostk/ordr", api_id="kt10001", body=body)
         ord_no = data.get("ord_no")        
-        tprint (f"place_sell_market : {ord_no}") 
-        if not ord_no:
+        print (f"place_sell_market : {ord_no}") 
+        if (data.get("return_code") != 0):
             #raise RuntimeError(f"매도주문 응답에 주문번호가 없습니다: {data}")
-            ord_no = "매도주문 응답에 주문번호가 없습니다:"
+            ord_no = f"매도주문 응답에 주문번호가 없습니다: {data.get("return_code")} / {data.get("return_msg")}"
         return ord_no
     
     def place_sell_order_cancel(self, orig_ord_no: str, stk_cd: str, qty: int = 0) -> str:
@@ -212,12 +212,7 @@ class KiwoomClient:
         }
 
         data = self._post("/api/dostk/ordr", api_id="kt10003", body=body)
-        ret_no = data.get("return_code")        
-        tprint (f"return_code : {ret_no}") 
-        if not ret_no:
-            #raise RuntimeError(f"매도주문 응답에 주문번호가 없습니다: {data}")
-            ret_no = "매도주문 응답에 주문번호가 없습니다:"
-        return ret_no
+        return data.get("return_msg")
     
     def get_order_List(self) -> List[Dict[str, Any]]:
         body =   {
@@ -320,10 +315,10 @@ class KiwoomClient:
         
         items = data.get("tdy_trde_qty_upper") or []
 
-#소팅 조건 넣기 체결강도순으로 소팅
-        sorted_items = sorted(items, key=lambda x: float(x["cntr_str"]), reverse=True)
+        #소팅 조건 넣기 체결강도순으로 소팅
+        sorted_items = sorted(items, key=lambda x: float(x["flu_rt"]), reverse=True)
 
-        for row in items:
+        for row in sorted_items:
             self.rcode = (row.get("stk_cd") or "").replace("_AL", "") 
             self.rname = row.get("stk_nm")
             self.rprice  = row.get("cur_prc")
@@ -486,40 +481,6 @@ class KiwoomClient:
             "sell_ord_no": sell_ord_no,
             "sell_price": tp_price,
         }
-
-    def place_market_sell_all2(
-        self,    
-        poll_sec: float = 1.0,
-        timeout_sec: int = 3,
-    ) -> str:
-        
-        # 1) 모두 팔아! 매도 주문 접수
-        balance_info = self.get_my_all_stock()
-        time.sleep(1)
-        tprint(balance_info)
-        tprint(f"보유 종목 수는 {len(balance_info)} 입니다.")
-        
-        result = self.get_order_List()
-        time.sleep(1)
-        ret_no = None
-
-        for r in result:    
-            stk_cd = r.get("stk_cd")
-            stk_nm = r.get("stk_nm")
-            ord_no = r.get("ord_no")
-            tprint(f"get_order_List -> {stk_cd} / {stk_nm} / {ord_no}")
-            ret_no = self.place_sell_order_cancel(ord_no, stk_cd)
-            tprint(f"place_sell_order_cancel = {ret_no}")
-            time.sleep(1)        
-    
-        # 잔고에서 매도 주문 실행
-        for stock in balance_info:
-            tprint(f"place_market_sell_all -> stk_cd = {stock['stk_cd']} / trde_able_qty = {int(stock['trde_able_qty'])}")
-            sell_no = self.place_sell_market(stock['stk_cd'],int(stock['trde_able_qty']))
-            tprint(f"sell_no{ret_no}")
-            time.sleep(1)
-
-        return ret_no
     
     def place_market_sell_all(
         self,    
@@ -532,7 +493,7 @@ class KiwoomClient:
         deadline = time.time() + timeout_sec + poll_sec + poll_sec + poll_sec + poll_sec 
         loop_su = 0            
         while time.time() < deadline:
-            tprint(f"deadline - {deadline} / {time.time()}")
+            tprint(f"deadline - {int(deadline)} / {int(time.time())}")
             loop_su = loop_su + 1
             if(loop_out < loop_su):
                 tprint(f"loop_out - {loop_out} / loop_su - {loop_su}")
@@ -548,31 +509,27 @@ class KiwoomClient:
             if(ret_no == 0):
                 tprint(f"ret_no - {ret_no}")
                 break
-
-            result = self.get_order_List()
-            time.sleep(poll_sec)
-            
-
-            for r in result:    
-                stk_cd = r.get("stk_cd")
-                stk_nm = r.get("stk_nm")
-                ord_no = r.get("ord_no")
-                print(f"get_order_List -> {stk_cd} / {stk_nm} / {ord_no}")
-                if(loop_su == 1):
-                    ret_no = self.place_sell_order_cancel(ord_no, stk_cd)                    
-                    print(f"place_sell_order_cancel = {ret_no}")
-                
-                time.sleep(poll_sec)        
-    
-            # 잔고에서 시장가 청산 매도 주문 실행
-            for stock in balance_info:
-                print(f"place_market_sell_all -> stk_cd = {stock['stk_cd']} / trde_able_qty = {int(stock['trde_able_qty'])}")
-                sell_no = self.place_sell_market(stock['stk_cd'], int(stock['trde_able_qty']))
-                if(sell_no.__contains__("없습니다")):
-                    print(f"place_sell_market [{stock['stk_cd']}][{stock['stk_nm']}]실패한 것으로 보임 -> {sell_no}")           
-                else:
-                    ret_no = ret_no + 1
+            else:
+                result = self.get_order_List()
                 time.sleep(poll_sec)
+                if(len(result) != 0) and (loop_su == 1): #첫번째만 캔슬
+                    for r in result:    
+                        stk_cd = r.get("stk_cd")
+                        stk_nm = r.get("stk_nm")
+                        ord_no = r.get("ord_no")
+                        print(f"get_order_List -> {stk_cd} / {stk_nm} / {ord_no}")                        
+                        ret_no = self.place_sell_order_cancel(ord_no, stk_cd)                    
+                        print(f"place_sell_order_cancel = {ret_no}")                        
+                        time.sleep(poll_sec)
+                
+                # 잔고에서 시장가 청산 매도 주문 실행
+                for stock in balance_info:
+                    print(f"place_market_sell_all -> stk_cd = {stock['stk_cd']} / trde_able_qty = {int(stock['rmnd_qty'])}")
+                    sell_no = self.place_sell_market(stock['stk_cd'], int(stock['rmnd_qty']))
+                    if(sell_no.__contains__("없습니다")):
+                        print(f"place_sell_market [{stock['stk_cd']}][{stock['stk_nm']}]실패한 것으로 보임 -> {sell_no}")           
+                    
+                    time.sleep(poll_sec)
 
         return ret_no
     
