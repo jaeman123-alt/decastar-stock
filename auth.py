@@ -13,7 +13,7 @@ import requests
 class KiwoomAuth:    
     _access_token : str = "토근을 발급하쇼!" 
     # """키움 REST API 액세스 토큰 발급/갱신 및 공통 헤더 제공."""
-    def __init__(self, akey,apsec, burl):
+    def __init__(self, akey, apsec, burl):
 
         self.app_key = akey
         self.app_secret = apsec
