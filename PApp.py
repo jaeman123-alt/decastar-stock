@@ -25,10 +25,10 @@ start_time: str = "00:00" # 00:00 일 경우 바로 시작
 sell_all_time1: str = "15:20"
 
 lim_price: int = 150000 # 비싼 건 넘기자고 
-lim_flu: int = 20 # 등락율 20 이상은 Pass
+lim_flu: int = 25 # 등락율 25 이상은 Pass
 
 int_ea: int = 10            #    ap.add_argument("--ea", type=int, required=True, help="대상 종목수 (잔액 자동 사용)")
-float_tp: float = 3.0       #    ap.add_argument("--tp", type=float, required=True, help="익절 % (매수가 대비)")
+float_tp: float = 4.0       #    ap.add_argument("--tp", type=float, required=True, help="익절 % (매수가 대비)")
 float_sl: float = 2.0       #    ap.add_argument("--sl", type=float, required=True, help="손절 % (매수가 대비)")    
 float_poll: float = 1       #    ap.add_argument("--poll", type=float, default=1.0, help="체결 폴링 간격(초)")
 float_timeout: float = 30   #    ap.add_argument("--timeout", type=int, default=30, help="매수 체결 대기 타임아웃(초)")        
@@ -41,7 +41,7 @@ b_JMKEY: bool = False #True # JM 계좌 사용
 b_JMMode: bool = False #True # 매매 없이 JM 을 위해 종목선정까지만 동작하도록
 
 int_resol_code: int = 10 #예비로 더 읽어 올 종목수
-int_pick_code: int = 2 #1:JM 2:CY1 3:CY2
+int_pick_code: int = 1 #1:JM 2:CY1 3:CY2
 
 int_MaxLoop: int = 15  #최종 Maxloop 수
 
@@ -220,10 +220,11 @@ def main():
             print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][대상 종목 {loop_su}. : {stk_nm}][{store_code}] 현재가 {format(now_price,',')} / 가격 리미트가 {format(lim_price,',')}원 임으로  이 종목의 매수는 못혀")            
             loop_su = loop_su -1
             continue
-        elif check_2 > lim_flu: # 기준 2 등락율 20 넘는건 PASS혀
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][대상 종목 {loop_su}. : {stk_nm}][{store_code}] 등락율 {check_2} / 등락율 리미트가 {lim_flu}임으로  이 종목의 매수는 못혀")            
-            loop_su = loop_su -1
-            continue        
+        #int_pick_code 가 1이면 하지마
+        #elif check_2 > lim_flu: # 기준 2 등락율 20 넘는건 PASS혀
+        #    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][대상 종목 {loop_su}. : {stk_nm}][{store_code}] 등락율 {check_2} / 등락율 리미트가 {lim_flu}임으로  이 종목의 매수는 못혀")            
+        #    loop_su = loop_su -1
+        #    continue        
         
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][대상 종목 {loop_su}. : {stk_nm}][{store_code}] 현재가 {format(now_price,',')} / 구매가능수량 {qty}")
         
