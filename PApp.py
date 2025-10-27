@@ -48,6 +48,10 @@ int_pick_code: int = 1 #1:JM 2:CY1 3:CY2
 
 int_MaxLoop: int = 15  #최종 Maxloop 수
 
+SOCKET_URL = 'wss://mockapi.kiwoom.com:10000/api/dostk/websocket'  # 모의투자 접속 URL
+#SOCKET_URL = 'wss://api.kiwoom.com:10000/api/dostk/websocket'  # 접속 URL
+
+
 #예약 기다리는 함수
 def wait_until(hhmm: str) -> None:
 
@@ -145,28 +149,9 @@ def main():
     client = KiwoomClient(access_token, is_paper=True) #is_paper 실전에서는 False로 변경 할 것
     time.sleep(1)
 
-    #websocket_client = WebSocketClient(access_token)
-    """
-    # WebSocket 클라이언트를 백그라운드에서 실행합니다.
-    receive_task = asyncio.create_task(websocket_client.run())
-
-
-    # 실시간 항목 등록
-    asyncio.sleep(1)
-    websocket_client.send_message({
-        'trnm': 'REG', # 서비스명
-        'grp_no': '1', # 그룹번호
-        'refresh': '1', # 기존등록유지여부
-        'data': [{ # 실시간 등록 리스트
-            'item': ['039490'], # 실시간 등록 요소
-            'type': ['0B'], # 실시간 항목
-        }]
-    })
-
-    # 수신 작업이 종료될 때까지 대기
-    receive_task
-    """
-
+    #websocket_client = WebSocketClient(SOCKET_URL, access_token)
+    #asyncio.run(websocket_client.run())
+    #asyncio.run(websocket_client.websocket_test())
 
     #예약시간기다리기    
     if(b_Test): 
