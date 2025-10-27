@@ -1,6 +1,6 @@
 # ===============================
 # file: PApp.py
-# version : 5.0.1
+# version : 5.0.2
 # ===============================
 # python PApp.py | Tee-Object 1.txt -Append
 # 밑에 상수를 고쳐서 사용하시요.
