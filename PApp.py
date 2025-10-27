@@ -1,6 +1,6 @@
 # ===============================
 # file: PApp.py
-# version : 5.0.0
+# version : 5.0.1
 # ===============================
 # python PApp.py | Tee-Object 1.txt -Append
 # 밑에 상수를 고쳐서 사용하시요.
@@ -14,9 +14,12 @@ import argparse
 from typing import Any
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+import asyncio
+import websockets
 
 from auth import KiwoomAuth #요건 인증 
 from kiwoom_client import KiwoomClient #요건 관련 함수
+from WebSocket_Client import WebSocketClient #요건 관련 함수
 from tools import * #요건 공통 함수
 
 start_time: str = "00:00" # 00:00 일 경우 바로 시작
@@ -137,9 +140,33 @@ def main():
         print("account : cyKim...#81134836 25-10-22 ~ 26-01-22 김창연 1000만원 #")
         
     auth = KiwoomAuth(app_key, app_secret, BaseURL)    
+    access_token=auth._access_token
     time.sleep(1)    
-    client = KiwoomClient(access_token=auth._access_token, is_paper=True) #is_paper 실전에서는 False로 변경 할 것
+    client = KiwoomClient(access_token, is_paper=True) #is_paper 실전에서는 False로 변경 할 것
     time.sleep(1)
+
+    #websocket_client = WebSocketClient(access_token)
+    """
+    # WebSocket 클라이언트를 백그라운드에서 실행합니다.
+    receive_task = asyncio.create_task(websocket_client.run())
+
+
+    # 실시간 항목 등록
+    asyncio.sleep(1)
+    websocket_client.send_message({
+        'trnm': 'REG', # 서비스명
+        'grp_no': '1', # 그룹번호
+        'refresh': '1', # 기존등록유지여부
+        'data': [{ # 실시간 등록 리스트
+            'item': ['039490'], # 실시간 등록 요소
+            'type': ['0B'], # 실시간 항목
+        }]
+    })
+
+    # 수신 작업이 종료될 때까지 대기
+    receive_task
+    """
+
 
     #예약시간기다리기    
     if(b_Test): 
