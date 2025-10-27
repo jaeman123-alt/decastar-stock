@@ -1,6 +1,6 @@
 # ===============================
 # file: PApp.py
-# version : 5.0.0
+# version : 5.0.1
 # ===============================
 # python PApp.py | Tee-Object 1.txt -Append
 # 밑에 상수를 고쳐서 사용하시요.
@@ -14,9 +14,12 @@ import argparse
 from typing import Any
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+import asyncio
+import websockets
 
 from auth import KiwoomAuth #요건 인증 
 from kiwoom_client import KiwoomClient #요건 관련 함수
+from WebSocket_Client import WebSocketClient #요건 관련 함수
 from tools import * #요건 공통 함수
 
 start_time: str = "00:00" # 00:00 일 경우 바로 시작
@@ -41,7 +44,7 @@ b_JMKEY: bool = False #True # JM 계좌 사용
 b_JMMode: bool = False #True # 매매 없이 JM 을 위해 종목선정까지만 동작하도록
 
 int_resol_code: int = 10 #예비로 더 읽어 올 종목수
-int_pick_code: int = 1 #1:JM 2:CY1 3:CY2
+int_pick_code: int = 3 #1:JM 2:CY1 3:CY2
 
 int_MaxLoop: int = 15  #최종 Maxloop 수
 
@@ -137,9 +140,33 @@ def main():
         print("account : cyKim...#81134836 25-10-22 ~ 26-01-22 김창연 1000만원 #")
         
     auth = KiwoomAuth(app_key, app_secret, BaseURL)    
+    access_token=auth._access_token
     time.sleep(1)    
-    client = KiwoomClient(access_token=auth._access_token, is_paper=True) #is_paper 실전에서는 False로 변경 할 것
+    client = KiwoomClient(access_token, is_paper=True) #is_paper 실전에서는 False로 변경 할 것
     time.sleep(1)
+
+    #websocket_client = WebSocketClient(access_token)
+    """
+    # WebSocket 클라이언트를 백그라운드에서 실행합니다.
+    receive_task = asyncio.create_task(websocket_client.run())
+
+
+    # 실시간 항목 등록
+    asyncio.sleep(1)
+    websocket_client.send_message({
+        'trnm': 'REG', # 서비스명
+        'grp_no': '1', # 그룹번호
+        'refresh': '1', # 기존등록유지여부
+        'data': [{ # 실시간 등록 리스트
+            'item': ['039490'], # 실시간 등록 요소
+            'type': ['0B'], # 실시간 항목
+        }]
+    })
+
+    # 수신 작업이 종료될 때까지 대기
+    receive_task
+    """
+
 
     #예약시간기다리기    
     if(b_Test): 
@@ -221,10 +248,10 @@ def main():
             loop_su = loop_su -1
             continue
         #int_pick_code 가 1이면 하지마
-        #elif check_2 > lim_flu: # 기준 2 등락율 20 넘는건 PASS혀
-        #    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][대상 종목 {loop_su}. : {stk_nm}][{store_code}] 등락율 {check_2} / 등락율 리미트가 {lim_flu}임으로  이 종목의 매수는 못혀")            
-        #    loop_su = loop_su -1
-        #    continue        
+        elif check_2 > lim_flu: # 기준 2 등락율 20 넘는건 PASS혀
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][대상 종목 {loop_su}. : {stk_nm}][{store_code}] 등락율 {check_2} / 등락율 리미트가 {lim_flu}임으로  이 종목의 매수는 못혀")            
+            loop_su = loop_su -1
+            continue        
         
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][대상 종목 {loop_su}. : {stk_nm}][{store_code}] 현재가 {format(now_price,',')} / 구매가능수량 {qty}")
         
