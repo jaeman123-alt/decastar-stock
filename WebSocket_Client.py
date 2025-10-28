@@ -6,26 +6,20 @@ from __future__ import annotations
 import asyncio
 import websockets
 import json
+import requests
 
-from dataclasses import dataclass
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
 from tools import *
 
-SOCKET_URL = 'wss://api.kiwoom.com:10000/api/dostk/websocket'  # 접속할 주소
-
 class WebSocketClient:
-    access_token: str
-
-    def __init__(self, uri):                
+    def __init__(self, uri, access_token):                
         tprint("[WebSocketClient] 시작")
 
-        self.uri = SOCKET_URL   # 연결한 서버의 주소
+        self.uri = uri   # 연결한 서버의 주소
+        self.access_token = access_token
         self.websocket = None  # 실제 웹소켓 연결을 관리하는 변수
         self.connected = False # 연결상태 (True면 연결됨)
         self.keep_running = True
-
-
+        self.condition_data = []  # 조건식 종목코드 저장용
 
     async def connect(self):
         try:
@@ -36,13 +30,9 @@ class WebSocketClient:
             # 로그인 패킷
             param = {
                 'trnm': 'LOGIN',
-                'token': access_token
+                'token': self.access_token
             }
-
-            print('실시간 시세 서버로 로그인 패킷을 전송합니다.')
-            # 웹소켓 연결 시 로그인 정보 전달
             await self.send_message(message=param)
-
         except Exception as e:
             print(f'Connection error: {e}')
             self.connected = False
@@ -78,8 +68,8 @@ class WebSocketClient:
                 elif response.get('trnm') == 'PING':
                     await self.send_message(response)
 
-                if response.get('trnm') != 'PING':
-                    print(f'실시간 시세 서버 응답 수신: {response}')
+                else:
+                    print(f'수신 메시지: {response}')
 
             except websockets.ConnectionClosed:
                 print('Connection closed by the server')
@@ -89,8 +79,10 @@ class WebSocketClient:
 
     #웹소켓 실행
     async def run(self):
+        print('websocket run.')
         await self.connect()
         await self.receive_messages()
+        await asyncio.sleep(2)  # 로그인 완료 대기
 
 
     #웹소켓 종료
@@ -101,7 +93,16 @@ class WebSocketClient:
             self.connected = False
             print('Disconnected from WebSocket server')
 
+    async def websocket_test(self):
+        print('websocket CNSRLST.')
+        websocket_task = asyncio.create_task(self.send_message({'trnm': 'CNSRLST'})) 
 
+        # 수신 작업이 종료될 때까지 대기
+        await websocket_task
+
+        # websocket 종료
+        await self.disconnect()
+        await websocket_task
 
 
 
