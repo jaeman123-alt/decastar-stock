@@ -1,6 +1,6 @@
 # ===============================
 # file: PApp.py
-# version : 5.0.2
+# version : 5.0.3
 # ===============================
 # python PApp.py | Tee-Object 1.txt -Append
 # 밑에 상수를 고쳐서 사용하시요.
@@ -149,27 +149,10 @@ def main():
     client = KiwoomClient(access_token, is_paper=True) #is_paper 실전에서는 False로 변경 할 것
     time.sleep(1)
 
-    #websocket_client = WebSocketClient(access_token)
-    """
-    # WebSocket 클라이언트를 백그라운드에서 실행합니다.
-    receive_task = asyncio.create_task(websocket_client.run())
+    #websocket_client = WebSocketClient(SOCKET_URL, access_token)
+    #asyncio.run(websocket_client.run())
+    #asyncio.run(websocket_client.websocket_test())
 
-
-    # 실시간 항목 등록
-    asyncio.sleep(1)
-    websocket_client.send_message({
-        'trnm': 'REG', # 서비스명
-        'grp_no': '1', # 그룹번호
-        'refresh': '1', # 기존등록유지여부
-        'data': [{ # 실시간 등록 리스트
-            'item': ['039490'], # 실시간 등록 요소
-            'type': ['0B'], # 실시간 항목
-        }]
-    })
-
-    # 수신 작업이 종료될 때까지 대기
-    receive_task
-    """
 
 
     #예약시간기다리기    
