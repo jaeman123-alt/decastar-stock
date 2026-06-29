@@ -1,25 +1,31 @@
 # ===============================
 # file: SHApp_kodex_leverage_oto_state_machine.py
-# version : 2.0.0
+# version : 2.3.0
 # ===============================
 # python SHApp_kodex_leverage_oto.py
 #
 # 기능 요약
+# v2.2.0
+#    - 최초 계좌금액의 50%만 진입하고, 나머지 50%는 10단계 물타기 예산으로 보관합니다.
+#    - DCA트리거선 터치 시 즉시 매도하지 않고 단계별 추가매수(DCA)를 실행합니다.
+#    - 추가매수 후 평균단가 기준으로 익절 지정가를 다시 등록합니다.
+#    - DCA 단계가 모두 소진된 뒤 DCA트리거선에 다시 닿으면 최종 DCA트리거합니다.
+#    - 거래/전략 이벤트 CSV 저장 및 종료 리포트를 유지합니다.
 # 1) 일반 모드
 #    - 계좌 정보, 현재가, 예상 매수수량/금액 표시
 #    - 사용자 승인 후 KODEX SK하이닉스/삼성전자 단일종목레버리지 50:50 지정가/시장가 매수
 #    - 체결 대기 중 진행상황 출력
 #    - 체결가 기준 종목별 익절 %로 지정가 매도 등록
-#    - 종목별 손절 % 가격을 계산하고, 손절 감시가 켜져 있으면 현재가 감시 후 해당 종목만 시장가 매도
-#    - 익절 체결로 보유수량이 0주가 되면 같은 종목을 시장가로 재매수하고 익절/손절 감시에 재등록
+#    - 종목별 DCA트리거 % 가격을 계산하고, DCA 감시가 켜져 있으면 현재가 감시 후 해당 종목만 시장가 매도
+#    - 익절 체결로 보유수량이 0주가 되면 같은 종목을 시장가로 재매수하고 익절/DCA 감시에 재등록
 #    - 지정한 마감 시간이 되면 미체결 주문 취소 후 전체 청산, 계좌 정보 출력, 프로그램 종료
 #
 # 2) 재시작/복구 모드
 #    - 프로그램 강제 종료 후 다시 시작할 때 매수는 PASS
-#    - 종목별 매입가만 입력하면 종목별 익절 % / 손절 %로 가격 자동 계산
+#    - 종목별 매입가만 입력하면 종목별 익절 % / DCA트리거 %로 가격 자동 계산
 #    - 계좌 보유/매도가능수량 확인
 #    - 익절 지정가 재등록
-#    - 손절 감시 진입
+#    - DCA 감시 진입
 #
 # 재시작 방법 1: 코드 상단 설정 사용
 # RESTORE_MODE = True
@@ -41,8 +47,8 @@
 # python SHApp_kodex_leverage_oto.py --yes --log 260626.txt
 #
 # 주의
-# place_loss_cut_sell()은 손절 예약 함수가 아니라 즉시 시장가 청산 계열 함수입니다.
-# 이 파일은 손절 감시 중 손절가에 도달한 특정 종목만 매도가능수량 확인 후 시장가 매도합니다.
+# place_loss_cut_sell()은 DCA트리거 예약 함수가 아니라 즉시 시장가 청산 계열 함수입니다.
+# 이 파일은 DCA 감시 중 DCA트리거가에 도달한 특정 종목만 매도가능수량 확인 후 시장가 매도합니다.
 
 from __future__ import annotations
 
@@ -51,6 +57,7 @@ import math
 import time
 import sys
 import argparse
+import csv
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -186,7 +193,7 @@ b_Test: bool = False
 
 # ===============================
 # 종목별 매매 설정
-# 익절/손절 %를 종목별로 분리했습니다.
+# 익절/DCA트리거 %를 종목별로 분리했습니다.
 # ===============================
 
 TARGET_STOCKS: list[dict[str, Any]] = [
@@ -194,9 +201,10 @@ TARGET_STOCKS: list[dict[str, Any]] = [
         "code": "0193T0",
         "name": "KODEX SK하이닉스단일종목레버리지",
         "weight": 0.50,
-        "take_profit_pct": 2.0,
-        "stop_loss_pct": 2.0,
-        "take_profit_schedule": [4.0, 3.5, 3.0, 2.5, 2.0, 1.5, 1.2, 1.0, 0.8, 0.5],
+        "take_profit_pct": 4.0,
+        "stop_loss_pct": 3.0,
+        "take_profit_schedule": [4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0],
+        "stop_loss_schedule": [3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5],
         "test_down_rate": 0.015,   # TEST_MODE: 1초마다 -1.5%
         "test_sellable_qty": 10,   # TEST_MODE: 가상 매도가능수량
     },
@@ -204,9 +212,10 @@ TARGET_STOCKS: list[dict[str, Any]] = [
         "code": "0193W0",
         "name": "KODEX 삼성전자단일종목레버리지",
         "weight": 0.50,
-        "take_profit_pct": 2.0,
-        "stop_loss_pct": 2.0,
-        "take_profit_schedule": [4.0, 3.5, 3.0, 2.5, 2.0, 1.5, 1.2, 1.0, 0.8, 0.5],
+        "take_profit_pct": 4.0,
+        "stop_loss_pct": 3.0,
+        "take_profit_schedule": [4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0],
+        "stop_loss_schedule": [3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5],
         "test_down_rate": 0.010,   # TEST_MODE: 1초마다 -1.0%
         "test_sellable_qty": 10,   # TEST_MODE: 가상 매도가능수량
     },
@@ -216,11 +225,11 @@ TARGET_STOCKS: list[dict[str, Any]] = [
 # 재시작/복구 모드 설정
 # ===============================
 
-# True이면 신규 매수는 하지 않고 RESTORE_STOCKS의 매입가 기준으로 익절/손절가를 계산합니다.
+# True이면 신규 매수는 하지 않고 RESTORE_STOCKS의 매입가 기준으로 익절/DCA트리거가를 계산합니다.
 RESTORE_MODE: bool = False
 
 # 형식: code + buy_price만 입력합니다.
-# 익절가/손절가는 TARGET_STOCKS의 take_profit_pct, stop_loss_pct로 자동 계산합니다.
+# 익절가/DCA트리거가는 TARGET_STOCKS의 take_profit_pct, stop_loss_pct로 자동 계산합니다.
 RESTORE_STOCKS: list[dict[str, Any]] = [
     # {"code": "0193T0", "buy_price": 10000},
     # {"code": "0193W0", "buy_price": 10000},
@@ -230,16 +239,46 @@ RESTORE_STOCKS: list[dict[str, Any]] = [
 RESTORE_AUTO_YES: bool = False
 
 # ===============================
-# 손절 감시 설정
+# DCA 감시 설정
 # ===============================
 
 STOP_LOSS_WATCH_ENABLED: bool = True
 STOP_LOSS_CHECK_SEC: float = 1.0
 STOP_LOSS_PRINT_SEC: float = 60.0
 
+# ===============================
+# DCA 물타기 전략 설정
+# ===============================
+# 전체 계좌 주문가능금액 중 최초 진입에 사용할 비율입니다.
+# 0.50이면 최초에는 전체 자금의 50%만 매수하고, 나머지 50%는 물타기 예산으로 보관합니다.
+INITIAL_ENTRY_CASH_RATE: float = 0.50
+
+# 남겨둔 자금 중 DCA 물타기에 사용할 비율입니다.
+DCA_RESERVE_CASH_RATE: float = 0.50
+
+# DCA트리거선 터치 시 매도하지 않고 DCA 추가매수를 실행할지 여부입니다.
+DCA_ON_STOP_TOUCH_ENABLED: bool = True
+
+# DCA 단계별 예산 가중치입니다. 합계 기준으로 남은 50% 예산을 나눕니다.
+# 후반으로 갈수록 더 큰 금액을 투입해 평균단가 인하 효과를 키우는 구조입니다.
+DCA_BUDGET_WEIGHTS: list[float] = [1, 1, 2, 2, 3, 4, 5, 6, 8, 10]
+
+# +4 / -3 실험 설정
+# 여기서 -3은 실제 손절 매도폭이 아니라 DCA 추가매수 트리거입니다.
+# 가격이 기준가 대비 -3% 도달하면 익절 주문을 취소하고 DCA 추가매수 후 평균단가 기준으로 익절을 다시 등록합니다.
+DEFAULT_TAKE_PROFIT_PCT: float = 4.0
+DEFAULT_DCA_TRIGGER_PCT: float = 3.0
+
+# DCA 후 새 익절가는 평균단가 기준으로 계산합니다.
+DCA_TAKE_PROFIT_FROM_AVG_PRICE: bool = True
+
+# DCA 추가매수도 BUY_ORDER_TYPE 설정을 따릅니다.
+DCA_BUY_USES_BUY_ORDER_TYPE: bool = True
+
+
 # 익절 체결 후 자동 재진입 설정
 # 익절 지정가 매도가 체결되어 보유수량이 0주가 되면, 같은 종목을 시장가로 다시 매수하고
-# 새 체결가 기준으로 익절 주문과 손절 감시를 다시 설정합니다.
+# 새 체결가 기준으로 익절 주문과 DCA 감시를 다시 설정합니다.
 TAKE_PROFIT_REBUY_ENABLED: bool = True
 
 # 재진입 매수는 사용자 요청에 따라 BUY_ORDER_TYPE과 무관하게 시장가로 실행합니다.
@@ -249,27 +288,37 @@ TAKE_PROFIT_REBUY_SAME_QTY: bool = True
 # ===============================
 # 상태 머신 전략 설정
 # ===============================
-# NORMAL   : 최초 매수 후 기본 익절/손절 감시
-# RECOVERY : 손절선에 닿았지만 매도하지 않고, 현재가를 새 기준가로 삼아 익절/손절 가격을 재설정
+# NORMAL   : 최초 매수 후 기본 익절/DCA 감시
+# RECOVERY : DCA트리거선에 닿았지만 매도하지 않고, 현재가를 새 기준가로 삼아 익절/DCA트리거 가격을 재설정
 # EXIT     : 최대 재설정/재진입 횟수 도달 또는 마감 청산
 
-# True이면 손절가에 도달해도 즉시 매도하지 않고, 현재가 기준으로 익절/손절 가격을 다시 설정합니다.
+# True이면 DCA트리거가에 도달해도 즉시 매도하지 않고, 현재가 기준으로 익절/DCA트리거 가격을 다시 설정합니다.
 # 단, MAX_REBUY_PER_STOCK 횟수에 도달하면 실제 시장가 손절 매도를 실행합니다.
 STOP_LOSS_PRICE_RESET_ENABLED: bool = True
 
 # 구버전 호환용 이름입니다. 새 코드에서는 STOP_LOSS_PRICE_RESET_ENABLED를 사용합니다.
 STOP_LOSS_REBUY_ENABLED: bool = STOP_LOSS_PRICE_RESET_ENABLED
 
-# 종목별 최대 재진입/손절가 재설정 횟수입니다.
-# 익절 후 재매수와 손절가 재설정을 합산해서 관리합니다.
+# 종목별 최대 재진입/DCA트리거가 재설정 횟수입니다.
+# 익절 후 재매수와 DCA트리거가 재설정을 합산해서 관리합니다.
 MAX_REBUY_PER_STOCK: int = 10
 
-# 손절 재설정 회차별 익절률입니다.
-# 예: 0회차는 기본 익절률, 손절 재설정이 누적될수록 목표 익절률을 낮춰 반등 탈출 가능성을 높입니다.
+# DCA트리거 재설정 회차별 익절률입니다.
+# 예: 0회차는 기본 익절률, DCA트리거 재설정이 누적될수록 목표 익절률을 낮춰 반등 탈출 가능성을 높입니다.
 # 종목별 take_profit_schedule이 있으면 그 값을 우선 사용합니다.
-DEFAULT_TAKE_PROFIT_SCHEDULE: list[float] = [4.0, 3.5, 3.0, 2.5, 2.0, 1.5, 1.2, 1.0, 0.8, 0.5]
+DEFAULT_TAKE_PROFIT_SCHEDULE: list[float] = [4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0]
 
-# 손절 재설정 시 기존 익절 주문을 취소하고 새 기준가 기준 익절 주문을 다시 등록합니다.
+# 단타 수수료 부담을 줄이기 위해 익절률은 고정하고, DCA트리거선 터치 때 DCA트리거폭만 점진적으로 확대합니다.
+KEEP_TAKE_PROFIT_FIXED_ON_STOP_RESET: bool = True
+DEFAULT_STOP_LOSS_SCHEDULE: list[float] = [3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5]
+
+# 거래 기록/리포트 설정
+TRADE_CSV_ENABLED: bool = True
+TRADE_CSV_PATH: str = ""  # 비우면 trade_history_YYYYMMDD.csv 로 저장
+TRADE_REPORT_ENABLED: bool = True
+TRADE_EVENTS: list[dict[str, Any]] = []
+
+# DCA트리거 재설정 시 기존 익절 주문을 취소하고 새 기준가 기준 익절 주문을 다시 등록합니다.
 RESET_TAKE_PROFIT_ON_STOP_RESET: bool = True
 
 STATE_NORMAL: str = "NORMAL"
@@ -282,7 +331,7 @@ REBUY_WAIT_SEC: float = 3.0
 # 마감 청산 설정
 # True이면 FORCE_EXIT_TIME에 도달하는 순간 미체결 주문을 취소하고 모든 보유종목을 시장가 청산한 뒤 종료합니다.
 FORCE_EXIT_ENABLED: bool = True
-FORCE_EXIT_TIME: str = "15:19"
+FORCE_EXIT_TIME: str = "15:20"
 
 # API 과호출 방지: 잔고조회(kt00018)는 최소 간격을 둡니다.
 BALANCE_QUERY_MIN_INTERVAL_SEC: float = 3.0
@@ -353,6 +402,130 @@ _LAST_ORDER_API_TS: float = 0.0
 # 공통 유틸
 # ===============================
 
+
+def _trade_csv_path() -> str:
+    if TRADE_CSV_PATH:
+        return TRADE_CSV_PATH
+    return f"trade_history_{datetime.now():%Y%m%d}.csv"
+
+
+def _log_trade_event(
+    event: str,
+    stk_cd: str,
+    stk_nm: str = "",
+    qty: int = 0,
+    price: int = 0,
+    base_price: int = 0,
+    order_no: Any = "",
+    profit_amount: int | None = None,
+    profit_pct: float | None = None,
+    memo: str = "",
+    **extra: Any,
+) -> None:
+    """매매/전략 이벤트를 메모리와 CSV에 기록합니다.
+
+    실제 체결 손익은 증권사 체결/잔고 기준과 다를 수 있으므로, 여기의 profit은 프로그램 기준가 기반 추정값입니다.
+    """
+    code = _norm_code(stk_cd)
+    if not stk_nm:
+        stk_nm = _target_name(code)
+    row = {
+        "time": _now(),
+        "event": event,
+        "stk_cd": code,
+        "stk_nm": stk_nm,
+        "qty": int(qty or 0),
+        "price": int(price or 0),
+        "base_price": int(base_price or 0),
+        "order_no": str(order_no or ""),
+        "profit_amount": "" if profit_amount is None else int(profit_amount),
+        "profit_pct": "" if profit_pct is None else round(float(profit_pct), 4),
+        "memo": memo,
+    }
+    for key, value in extra.items():
+        row[key] = value
+    TRADE_EVENTS.append(row)
+
+    if not TRADE_CSV_ENABLED:
+        return
+
+    path = _trade_csv_path()
+    fieldnames = [
+        "time", "event", "stk_cd", "stk_nm", "qty", "price", "base_price", "order_no",
+        "profit_amount", "profit_pct", "memo", "state", "cycle", "take_profit_price", "stop_loss_price",
+    ]
+    for key in row.keys():
+        if key not in fieldnames:
+            fieldnames.append(key)
+
+    file_exists = os.path.exists(path) and os.path.getsize(path) > 0
+    try:
+        with open(path, "a", newline="", encoding="utf-8-sig") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(row)
+    except Exception as exc:
+        print(f"[{_now()}] 거래 CSV 기록 실패: {exc}")
+
+
+def _print_trade_report() -> None:
+    if not TRADE_REPORT_ENABLED:
+        return
+
+    print("\n" + "=" * 72)
+    print(f"[{_now()}] 당일 프로그램 거래 리포트")
+    print("=" * 72)
+
+    if not TRADE_EVENTS:
+        print("기록된 거래/전략 이벤트가 없습니다.")
+        return
+
+    by_code: dict[str, dict[str, Any]] = {}
+    total_profit = 0
+    total_profit_known = False
+    for row in TRADE_EVENTS:
+        code = str(row.get("stk_cd", ""))
+        if code not in by_code:
+            by_code[code] = {
+                "name": row.get("stk_nm", code),
+                "BUY": 0,
+                "TAKE_PROFIT_FILLED": 0,
+                "REBUY": 0,
+                "STOP_RESET": 0,
+                "FINAL_STOP_SELL": 0,
+                "SELL_ALL": 0,
+                "profit": 0,
+                "profit_known": False,
+            }
+        info = by_code[code]
+        ev = str(row.get("event", ""))
+        if ev in info:
+            info[ev] += 1
+        pa = row.get("profit_amount", "")
+        if pa not in (None, ""):
+            try:
+                info["profit"] += int(pa)
+                info["profit_known"] = True
+                total_profit += int(pa)
+                total_profit_known = True
+            except Exception:
+                pass
+
+    for code, info in by_code.items():
+        profit_text = f" / 추정손익 {format(info['profit'], ',')}원" if info["profit_known"] else ""
+        print(
+            f"- {info['name']}[{code}] "
+            f"매수 {info['BUY']}회 / 재매수 {info['REBUY']}회 / 익절추정 {info['TAKE_PROFIT_FILLED']}회 / "
+            f"DCA트리거재설정 {info['STOP_RESET']}회 / 최종손절 {info['FINAL_STOP_SELL']}회 / 전체청산 {info['SELL_ALL']}회"
+            f"{profit_text}"
+        )
+
+    if total_profit_known:
+        print(f"총 추정 손익: {format(total_profit, ',')}원")
+    print(f"CSV 저장 위치: {_trade_csv_path() if TRADE_CSV_ENABLED else '비활성화'}")
+
+
 def wait_until(hhmm: str) -> None:
     if hhmm == "00:00":
         return
@@ -421,8 +594,9 @@ def _target_by_code(stk_cd: str) -> dict[str, Any]:
         "name": code,
         "weight": 0.0,
         "take_profit_pct": 4.0,
-        "stop_loss_pct": 2.0,
-        "take_profit_schedule": [4.0, 3.5, 3.0, 2.5, 2.0, 1.5, 1.2, 1.0, 0.8, 0.5],
+        "stop_loss_pct": 3.0,
+        "take_profit_schedule": [4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0],
+        "stop_loss_schedule": [3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5],
         "test_down_rate": 0.01,
         "test_sellable_qty": 10,
     }
@@ -437,7 +611,14 @@ def _take_profit_pct(stk_cd: str) -> float:
 
 
 def _take_profit_pct_by_cycle(stk_cd: str, cycle_count: int = 0) -> float:
-    """손절 재설정/재진입 회차에 따라 익절률을 반환합니다."""
+    """회차별 익절률을 반환합니다.
+
+    단타 수수료 부담 때문에 기본 전략은 익절률을 고정합니다.
+    KEEP_TAKE_PROFIT_FIXED_ON_STOP_RESET=False 로 바꾸면 기존 schedule 방식으로 동작합니다.
+    """
+    if KEEP_TAKE_PROFIT_FIXED_ON_STOP_RESET:
+        return _take_profit_pct(stk_cd)
+
     target = _target_by_code(stk_cd)
     schedule = target.get("take_profit_schedule", DEFAULT_TAKE_PROFIT_SCHEDULE)
     try:
@@ -451,6 +632,23 @@ def _take_profit_pct_by_cycle(stk_cd: str, cycle_count: int = 0) -> float:
 
 def _stop_loss_pct(stk_cd: str) -> float:
     return float(_target_by_code(stk_cd).get("stop_loss_pct", 6.0))
+
+
+def _stop_loss_pct_by_cycle(stk_cd: str, cycle_count: int = 0) -> float:
+    """DCA트리거 재설정 회차에 따라 DCA트리거폭을 반환합니다.
+
+    예: 2.0 → 2.5 → 3.0 ... 처럼 DCA트리거폭만 넓혀 매매 횟수를 줄이고,
+    단기 반등을 기다리는 구조입니다.
+    """
+    target = _target_by_code(stk_cd)
+    schedule = target.get("stop_loss_schedule", DEFAULT_STOP_LOSS_SCHEDULE)
+    try:
+        if schedule:
+            idx = max(0, min(int(cycle_count), len(schedule) - 1))
+            return float(schedule[idx])
+    except Exception:
+        pass
+    return _stop_loss_pct(stk_cd)
 
 
 def _test_down_rate(stk_cd: str) -> float:
@@ -543,8 +741,8 @@ def _calc_take_profit_price_with_pct(buy_price: int, pct: float) -> int:
     return floor_to(int(buy_price * (1 + pct / 100.0)), PRICE_UNIT)
 
 
-def _calc_stop_loss_price(stk_cd: str, buy_price: int) -> int:
-    pct = _stop_loss_pct(stk_cd)
+def _calc_stop_loss_price(stk_cd: str, buy_price: int, cycle_count: int = 0) -> int:
+    pct = _stop_loss_pct_by_cycle(stk_cd, cycle_count)
     return floor_to(int(buy_price * (1 - pct / 100.0)), PRICE_UNIT)
 
 
@@ -603,7 +801,7 @@ def _print_account_after_liquidation(client: KiwoomClient) -> None:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="KODEX 단일종목레버리지 50:50 매수, 익절 등록, 손절 감시 APP")
+    parser = argparse.ArgumentParser(description="KODEX 단일종목레버리지 DCA 매수, 익절 등록, DCA 감시 APP")
     parser.add_argument(
         "--restore",
         nargs="*",
@@ -684,7 +882,7 @@ def _get_balance_map(client: KiwoomClient, force_refresh: bool = False) -> dict[
     """잔고 전체를 1회 조회하여 종목코드별로 매핑합니다.
 
     kt00018은 짧은 시간에 반복 호출하면 HTTP 429가 발생할 수 있으므로 캐시를 사용합니다.
-    조회 실패 시 기존 캐시가 있으면 캐시를 반환하여 손절 감시가 바로 종료되지 않도록 합니다.
+    조회 실패 시 기존 캐시가 있으면 캐시를 반환하여 DCA 감시가 바로 종료되지 않도록 합니다.
     """
     global _LAST_BALANCE_MAP, _LAST_BALANCE_TS
 
@@ -708,7 +906,7 @@ def _get_balance_map(client: KiwoomClient, force_refresh: bool = False) -> dict[
     except Exception as exc:
         print(f"[{_now()}] 잔고 전체 조회 실패: {exc}")
         if _LAST_BALANCE_MAP:
-            print(f"[{_now()}] 잔고 조회 실패로 직전 잔고 캐시를 사용합니다. 손절 감시는 유지합니다.")
+            print(f"[{_now()}] 잔고 조회 실패로 직전 잔고 캐시를 사용합니다. DCA 감시는 유지합니다.")
         return _LAST_BALANCE_MAP
 
     result: dict[str, dict[str, Any]] = {}
@@ -805,7 +1003,7 @@ def _make_order_plan(client: KiwoomClient, cur_entr: int) -> list[dict[str, Any]
         stk_cd = _norm_code(target["code"])
         stk_nm = str(target["name"])
         weight = float(target["weight"])
-        budget = math.floor(cur_entr * weight)
+        budget = math.floor(cur_entr * INITIAL_ENTRY_CASH_RATE * weight)
 
         now_price = int(client.get_last_price(stk_cd))
         time.sleep(1)
@@ -824,6 +1022,7 @@ def _make_order_plan(client: KiwoomClient, cur_entr: int) -> list[dict[str, Any]
                 "stk_nm": stk_nm,
                 "weight": weight,
                 "budget": budget,
+                "dca_reserve_budget": math.floor(cur_entr * DCA_RESERVE_CASH_RATE * weight),
                 "now_price": now_price,
                 "planned_buy_price": planned_buy_price,
                 "buy_order_type": buy_order_type,
@@ -842,7 +1041,7 @@ def _make_order_plan(client: KiwoomClient, cur_entr: int) -> list[dict[str, Any]
 
 def _print_order_plan(plans: list[dict[str, Any]], cur_entr: int) -> None:
     print("\n" + "=" * 72)
-    print("50 / 50 실행 전 예상 매수 내역")
+    print("최초 50% 진입 + 50% DCA 예산 실행 전 예상 매수 내역")
     print("=" * 72)
 
     total_expected = 0
@@ -851,26 +1050,26 @@ def _print_order_plan(plans: list[dict[str, Any]], cur_entr: int) -> None:
         print(
             f"{plan['stk_nm']}[{plan['stk_cd']}] "
             f"비중 {plan['weight'] * 100:.0f}% / "
-            f"배정금액 {format(plan['budget'], ',')}원 / "
+            f"최초진입예산 {format(plan['budget'], ',')}원 / DCA예비예산 {format(plan.get('dca_reserve_budget', 0), ',')}원 / "
             f"현재가 {format(plan['now_price'], ',')}원 / "
             f"매수방식 {plan.get('buy_order_type', 'MARKET')} / "
             f"주문기준가 {format(plan.get('planned_buy_price', plan['now_price']), ',')}원 / "
             f"예상수량 {plan['qty']}주 / "
             f"예상매수금액 {format(plan['expected_amount'], ',')}원 / "
             f"익절 {plan['take_profit_pct']:.1f}% -> {format(plan['expected_take_profit_price'], ',')}원 / "
-            f"손절 {plan['stop_loss_pct']:.1f}% -> {format(plan['expected_stop_loss_price'], ',')}원"
+            f"DCA트리거 {plan['stop_loss_pct']:.1f}% -> {format(plan['expected_stop_loss_price'], ',')}원"
         )
 
     print("-" * 72)
     print(f"총 예상 매수금액: {format(total_expected, ',')}원")
-    print(f"예상 주문 후 잔여 주문가능금액: {format(cur_entr - total_expected, ',')}원")
+    print(f"예상 최초 진입 후 DCA/잔여 주문가능금액: {format(cur_entr - total_expected, ',')}원")
     if _buy_order_type() == "LIMIT":
         print(f"※ 지정가 매수 방식입니다. 주문기준가는 현재가 +{LIMIT_BUY_UP_PCT:.2f}%를 호가단위로 올림한 가격입니다.")
         print("※ 지정가보다 시장가격이 높으면 미체결될 수 있습니다.")
     else:
         print("※ 시장가 주문이므로 실제 체결금액은 현재가 기준 예상금액과 달라질 수 있습니다.")
     print("※ 익절 지정가 매도는 주문 등록합니다.")
-    print("※ 손절은 예약 등록이 아니라 감시 후 조건 충족 시 해당 종목만 시장가 매도합니다.")
+    print("※ DCA트리거은 예약 등록이 아니라 감시 후 조건 충족 시 해당 종목만 시장가 매도합니다.")
 
 
 def _confirm_execution(message: str) -> bool:
@@ -1152,7 +1351,7 @@ def _cancel_unfilled_orders_for_holdings(
     """
     전체 미체결 조회가 0건으로 나와도 보유종목별 미체결 매도 주문을 한 번 더 조회/취소합니다.
     익절 지정가 주문이 걸려 있으면 잔고상 매도가능수량이 0이 되므로,
-    sell-all/손절 전에는 이 보조 경로가 중요합니다.
+    sell-all/DCA트리거 전에는 이 보조 경로가 중요합니다.
     """
     results: list[dict[str, Any]] = []
     for code in sorted({_norm_code(c) for c in holding_codes if c}):
@@ -1550,7 +1749,7 @@ def _place_buy_then_takeprofit(client: KiwoomClient, stk_cd: str, buy_price: int
         raise TimeoutError(
             f"{stk_cd} 매수 체결을 확인하지 못했습니다. "
             f"주문번호={buy_ord_no}, timeout={int(float_timeout)}초. "
-            "매수 실패 또는 체결 미확인으로 판단하여 익절/손절 등록을 중단합니다."
+            "매수 실패 또는 체결 미확인으로 판단하여 익절/DCA트리거 등록을 중단합니다."
         )
 
     if buy_avg_price is None:
@@ -1565,10 +1764,10 @@ def _place_buy_then_takeprofit(client: KiwoomClient, stk_cd: str, buy_price: int
     if sellable_qty <= 0:
         raise RuntimeError(
             f"{stk_cd} 매수 체결은 확인했지만 매도가능수량이 0주입니다. "
-            "익절 지정가 매도와 손절 감시 등록을 중단합니다."
+            "익절 지정가 매도와 DCA 감시 등록을 중단합니다."
         )
     if sellable_qty < filled_qty:
-        print(f"[{_now()}] {stk_cd} 매도가능수량이 체결수량보다 작아 {sellable_qty}주만 익절/손절 대상으로 사용합니다.")
+        print(f"[{_now()}] {stk_cd} 매도가능수량이 체결수량보다 작아 {sellable_qty}주만 익절/DCA트리거 대상으로 사용합니다.")
         filled_qty = sellable_qty
 
     take_profit_price = _calc_take_profit_price(stk_cd, buy_avg_price)
@@ -1618,7 +1817,7 @@ def _can_rebuy(item: dict[str, Any], reason: str) -> bool:
 
 
 def _place_market_rebuy_then_takeprofit(client: KiwoomClient, item: dict[str, Any], reason: str = "재진입") -> dict[str, Any]:
-    """익절/손절 이후 같은 종목을 시장가로 재매수하고 새 익절 지정가 주문을 등록합니다."""
+    """익절/DCA트리거 이후 같은 종목을 시장가로 재매수하고 새 익절 지정가 주문을 등록합니다."""
     stk_cd = _norm_code(item["stk_cd"])
     stk_nm = str(item.get("stk_nm", _target_name(stk_cd)))
     prev_qty = int(item.get("qty", 0))
@@ -1641,6 +1840,20 @@ def _place_market_rebuy_then_takeprofit(client: KiwoomClient, item: dict[str, An
             f"수량 {filled_qty}주 / 기준가 {format(buy_avg_price, ',')}원 / "
             f"익절 {format(take_profit_price, ',')}원 / 익절주문 {take_profit_ord_no}"
         )
+        _log_trade_event(
+            event="REBUY",
+            stk_cd=stk_cd,
+            stk_nm=stk_nm,
+            qty=filled_qty,
+            price=buy_avg_price,
+            base_price=buy_avg_price,
+            order_no=buy_ord_no,
+            memo=f"{reason} TEST 재매수",
+            state=STATE_NORMAL,
+            cycle=int(item.get("rebuy_count", 0)) + 1,
+            take_profit_price=take_profit_price,
+            stop_loss_price=_calc_stop_loss_price(stk_cd, buy_avg_price, 0),
+        )
         return {
             "stk_nm": stk_nm,
             "stk_cd": stk_cd,
@@ -1655,6 +1868,9 @@ def _place_market_rebuy_then_takeprofit(client: KiwoomClient, item: dict[str, An
             "stop_loss_pct": _stop_loss_pct(stk_cd),
             "stop_loss_price": _calc_stop_loss_price(stk_cd, buy_avg_price),
             "rebuy_count": int(item.get("rebuy_count", 0)) + 1,
+            "dca_step": 0,
+            "dca_reserve_total": int(item.get("dca_reserve_total", 0) or 0),
+            "dca_used_amount": 0,
         }
 
     print(
@@ -1710,8 +1926,22 @@ def _place_market_rebuy_then_takeprofit(client: KiwoomClient, item: dict[str, An
     print(
         f"[{_now()}] [재진입 4/4] {stk_nm}[{stk_cd}] 재진입 완료 / "
         f"매수가 {format(buy_avg_price, ',')}원 / 수량 {filled_qty}주 / "
-        f"익절 {format(take_profit_price, ',')}원 / 손절 {format(stop_loss_price, ',')}원 / "
+        f"익절 {format(take_profit_price, ',')}원 / DCA트리거 {format(stop_loss_price, ',')}원 / "
         f"익절주문 {take_profit_ord_no}"
+    )
+    _log_trade_event(
+        event="REBUY",
+        stk_cd=stk_cd,
+        stk_nm=stk_nm,
+        qty=filled_qty,
+        price=buy_avg_price,
+        base_price=buy_avg_price,
+        order_no=buy_ord_no,
+        memo=reason,
+        state=STATE_NORMAL,
+        cycle=int(item.get("rebuy_count", 0)) + 1,
+        take_profit_price=take_profit_price,
+        stop_loss_price=stop_loss_price,
     )
 
     return {
@@ -1728,6 +1958,9 @@ def _place_market_rebuy_then_takeprofit(client: KiwoomClient, item: dict[str, An
         "stop_loss_pct": _stop_loss_pct(stk_cd),
         "stop_loss_price": stop_loss_price,
         "rebuy_count": int(item.get("rebuy_count", 0)) + 1,
+        "dca_step": 0,
+        "dca_reserve_total": int(item.get("dca_reserve_total", 0) or 0),
+        "dca_used_amount": 0,
     }
 
 
@@ -1778,6 +2011,142 @@ def _format_sellable_display(sellable_qty: int, holding_qty: int, take_profit_or
     return f"{sellable_qty}주"
 
 
+
+def _format_target_gap_pct(last_price: int, target_price: int) -> str:
+    """현재가에서 목표가까지 남은 퍼센트. 익절은 +, DCA 트리거는 - 방향으로 표시합니다."""
+    if last_price <= 0 or target_price <= 0:
+        return "-"
+    pct = (target_price - last_price) / last_price * 100.0
+    sign = "+" if pct >= 0 else ""
+    return f"{sign}{pct:.2f}%"
+
+
+def _format_dca_trigger_gap_pct(last_price: int, trigger_price: int) -> str:
+    """현재가에서 DCA 트리거 가격까지 하락 여유를 -%로 표시합니다."""
+    if last_price <= 0 or trigger_price <= 0:
+        return "-"
+    pct = (trigger_price - last_price) / last_price * 100.0
+    return f"{pct:.2f}%"
+
+
+def _format_watch_line(item: dict[str, Any], stk_cd: str, last_price: int, holding_qty: int, sellable_qty: int, extra: str = "") -> str:
+    tp_price = _safe_int(item.get("take_profit_price"), 0)
+    trigger_price = _safe_int(item.get("stop_loss_price"), 0)
+    dca_used = int(item.get("dca_used_amount", 0) or 0)
+    dca_total = int(item.get("dca_reserve_total", 0) or 0)
+    sellable_text = _format_sellable_display(sellable_qty, holding_qty, item.get("take_profit_ord_no"))
+    parts = [
+        f"[{_now()}] [감시] {item['stk_nm']}[{stk_cd}]",
+        f"상태 {_item_state(item)}",
+        f"현재 {format(last_price, ',')}원",
+        f"평단 {format(_strategy_base_price(item), ',')}원({_format_profit_pct(last_price, _strategy_base_price(item))})",
+        f"최초 {_format_profit_pct(last_price, _entry_price(item))}",
+        f"익절 {format(tp_price, ',')}원({_format_target_gap_pct(last_price, tp_price)})",
+        f"DCA {format(trigger_price, ',')}원({_format_dca_trigger_gap_pct(last_price, trigger_price)})",
+        f"보유 {holding_qty}주",
+        f"매도가능 {sellable_text}",
+        f"DCA {int(item.get('dca_step', _rebuy_count(item)) or 0)}/{len(DCA_BUDGET_WEIGHTS)}",
+    ]
+    if dca_total > 0:
+        parts.append(f"DCA예산 {format(dca_used, ',')}/{format(dca_total, ',')}원")
+    if item.get("take_profit_ord_no"):
+        parts.append(f"익절주문 {item.get('take_profit_ord_no')}")
+    if extra:
+        parts.append(extra)
+    return " | ".join(parts)
+
+
+def _dca_weight_sum() -> float:
+    total = sum(float(x) for x in DCA_BUDGET_WEIGHTS if float(x) > 0)
+    return total if total > 0 else 1.0
+
+
+def _dca_step_budget(item: dict[str, Any], step_index: int) -> int:
+    """step_index는 0부터 시작합니다."""
+    reserve_total = int(item.get("dca_reserve_total", 0) or 0)
+    used = int(item.get("dca_used_amount", 0) or 0)
+    if reserve_total <= 0:
+        return 0
+    if step_index < 0:
+        step_index = 0
+    if step_index >= len(DCA_BUDGET_WEIGHTS):
+        return 0
+    weight = float(DCA_BUDGET_WEIGHTS[step_index])
+    budget = int(reserve_total * weight / _dca_weight_sum())
+    remaining = max(0, reserve_total - used)
+    return min(budget, remaining)
+
+
+def _calc_weighted_avg_price(old_qty: int, old_avg: int, add_qty: int, add_price: int) -> int:
+    total_qty = int(old_qty or 0) + int(add_qty or 0)
+    if total_qty <= 0:
+        return int(add_price or old_avg or 0)
+    amount = int(old_qty or 0) * int(old_avg or 0) + int(add_qty or 0) * int(add_price or 0)
+    return int(round(amount / total_qty))
+
+
+def _place_dca_buy(client: KiwoomClient, stk_cd: str, stk_nm: str, budget: int, ref_price: int) -> tuple[str, int, int, int]:
+    """DCA 추가매수. 반환: 주문번호, 체결수량, 평균체결가, 주문금액추정"""
+    if budget <= 0:
+        raise RuntimeError(f"{stk_nm}[{stk_cd}] DCA 예산이 없습니다.")
+
+    if TEST_MODE:
+        order_price = int(ref_price)
+        qty = int(budget // order_price) if order_price > 0 else 0
+        if qty <= 0:
+            raise RuntimeError(f"{stk_nm}[{stk_cd}] TEST DCA 가능수량 0주 / 예산 {budget} / 기준가 {ref_price}")
+        ord_no = "TEST_DCA_BUY_NOT_SENT"
+        print(f"[{_now()}] [DCA-TEST] {stk_nm}[{stk_cd}] 추가매수 가정 / 예산 {format(budget, ',')}원 / 수량 {qty}주 / 체결가 {format(order_price, ',')}원")
+        return ord_no, qty, order_price, qty * order_price
+
+    order_type = _buy_order_type() if DCA_BUY_USES_BUY_ORDER_TYPE else "LIMIT"
+    if order_type == "LIMIT":
+        order_price = _calc_limit_buy_price(stk_cd, ref_price)
+        qty = int(budget // order_price) if order_price > 0 else 0
+        if qty <= 0:
+            raise RuntimeError(f"{stk_nm}[{stk_cd}] DCA 지정가 가능수량 0주 / 예산 {budget} / 주문가 {order_price}")
+        buy_ord_no, actual_qty, actual_order_price = _place_buy_limit_with_retry(client, stk_cd, qty, order_price)
+        print(f"[{_now()}] [DCA 2/5] {stk_nm}[{stk_cd}] 지정가 추가매수 주문 / 주문번호 {buy_ord_no} / 수량 {actual_qty}주 / 주문가 {format(actual_order_price, ',')}원")
+    else:
+        order_price = ref_price
+        safe_budget = int(budget * MARKET_BUY_CASH_SAFETY_RATE)
+        qty = int(safe_budget // order_price) if order_price > 0 else 0
+        if qty <= 0:
+            raise RuntimeError(f"{stk_nm}[{stk_cd}] DCA 시장가 가능수량 0주 / 예산 {budget} / 안전예산 {safe_budget} / 현재가 {order_price}")
+        buy_ord_no, actual_qty = _place_buy_market_with_retry(client, stk_cd, qty)
+        print(f"[{_now()}] [DCA 2/5] {stk_nm}[{stk_cd}] 시장가 추가매수 주문 / 주문번호 {buy_ord_no} / 수량 {actual_qty}주")
+
+    start_ts = time.time()
+    deadline = start_ts + float_timeout
+    filled_qty = 0
+    avg_price = 0
+    poll_count = 0
+    while time.time() < deadline:
+        poll_count += 1
+        remain_sec = max(0, int(deadline - time.time()))
+        try:
+            summ = client.get_order_fill_summary(buy_ord_no)
+            ord_qty = _safe_int(summ.get("ord_qty"), actual_qty)
+            filled_qty = _safe_int(summ.get("filled_qty"), 0)
+            avg_price = _safe_int(summ.get("avg_price"), 0)
+            print(
+                f"[{_now()}] [DCA 3/5] {stk_nm}[{stk_cd}] 체결 대기 {poll_count}회차 / "
+                f"주문 {ord_qty}주 / 체결 {filled_qty}주 / 평균가 {format(avg_price, ',')}원 / 남은시간 {remain_sec}초"
+            )
+            if ord_qty > 0 and filled_qty >= ord_qty:
+                if avg_price <= 0:
+                    avg_price = _safe_int(client.get_last_price(stk_cd), ref_price)
+                break
+        except Exception as exc:
+            print(f"[{_now()}] [DCA 3/5] {stk_nm}[{stk_cd}] 체결 조회 오류: {exc}")
+        time.sleep(float_poll)
+
+    if filled_qty <= 0:
+        raise TimeoutError(f"{stk_nm}[{stk_cd}] DCA 추가매수 체결 확인 실패 / 주문번호 {buy_ord_no}")
+    if avg_price <= 0:
+        avg_price = _safe_int(client.get_last_price(stk_cd), ref_price)
+    return buy_ord_no, filled_qty, avg_price, filled_qty * avg_price
+
 def _reset_prices_after_stop_touch(
     client: KiwoomClient,
     item: dict[str, Any],
@@ -1785,7 +2154,7 @@ def _reset_prices_after_stop_touch(
     holding_qty: int,
     sellable_qty: int,
 ) -> bool:
-    """손절선 터치 시 매도하지 않고 새 기준가 기준으로 익절/손절 주문을 재설정합니다."""
+    """DCA트리거선 터치 시 매도하지 않고 DCA 추가매수 후 평균단가 기준 익절/DCA트리거 주문을 재설정합니다."""
     stk_cd = _norm_code(item["stk_cd"])
     stk_nm = str(item.get("stk_nm", _target_name(stk_cd)))
     current_count = _rebuy_count(item)
@@ -1795,94 +2164,143 @@ def _reset_prices_after_stop_touch(
     old_tp_price = _safe_int(item.get("take_profit_price"), 0)
     old_tp_ord_no = item.get("take_profit_ord_no")
     entry_price = _entry_price(item)
+    old_avg_price = _strategy_base_price(item)
+    if old_avg_price <= 0:
+        old_avg_price = _safe_int(item.get("buy_avg_price"), last_price)
 
-    if next_count >= MAX_REBUY_PER_STOCK:
+    if next_count > MAX_REBUY_PER_STOCK:
+        return False
+    if DCA_ON_STOP_TOUCH_ENABLED and current_count >= len(DCA_BUDGET_WEIGHTS):
         return False
 
-    new_base_price = int(last_price)
-    new_tp_pct = _take_profit_pct_by_cycle(stk_cd, next_count)
-    new_tp_price = _calc_take_profit_price_with_pct(new_base_price, new_tp_pct)
-    new_stop_price = _calc_stop_loss_price(stk_cd, new_base_price)
+    dca_budget = _dca_step_budget(item, current_count)
 
     print(
-        f"[{_now()}] [RECOVERY] {stk_nm}[{stk_cd}] 손절선 터치 / "
-        f"현재 {format(last_price, ',')}원 <= 기존손절 {format(old_stop_price, ',')}원 / "
-        f"매입가대비 {_format_profit_pct(last_price, entry_price)} / "
-        f"재설정 {next_count}/{MAX_REBUY_PER_STOCK}"
+        f"[{_now()}] [DCA] {stk_nm}[{stk_cd}] DCA트리거선 터치 / "
+        f"현재 {format(last_price, ',')}원 <= 기존DCA트리거 {format(old_stop_price, ',')}원 / "
+        f"최초매입대비 {_format_profit_pct(last_price, entry_price)} / "
+        f"DCA단계 {next_count}/{MAX_REBUY_PER_STOCK} / 단계예산 {format(dca_budget, ',')}원"
     )
 
-    if RESET_TAKE_PROFIT_ON_STOP_RESET:
-        print(
-            f"[{_now()}] [RECOVERY 1/3] {stk_nm}[{stk_cd}] 기존 익절 주문 취소 / "
-            f"주문번호 {old_tp_ord_no} / 기존익절 {format(old_tp_price, ',')}원"
+    if dca_budget <= 0:
+        print(f"[{_now()}] [DCA중단] {stk_nm}[{stk_cd}] 남은 DCA 예산이 없어 최종 DCA트리거 대상으로 전환합니다.")
+        return False
+
+    print(
+        f"[{_now()}] [DCA 1/5] {stk_nm}[{stk_cd}] 기존 익절 주문 취소 / "
+        f"주문번호 {old_tp_ord_no} / 기존익절 {format(old_tp_price, ',')}원"
+    )
+    cancel_result = _cancel_take_profit_order(client, old_tp_ord_no, stk_cd, holding_qty)
+    print(f"[{_now()}] [DCA 1/5] {stk_nm}[{stk_cd}] 취소 결과: {cancel_result}")
+    if not TEST_MODE:
+        time.sleep(ORDER_CANCEL_WAIT_SEC)
+
+    try:
+        buy_ord_no, add_qty, add_avg_price, add_amount = _place_dca_buy(
+            client=client,
+            stk_cd=stk_cd,
+            stk_nm=stk_nm,
+            budget=dca_budget,
+            ref_price=last_price,
         )
-        cancel_result = _cancel_take_profit_order(client, old_tp_ord_no, stk_cd, holding_qty)
-        print(f"[{_now()}] [RECOVERY 1/3] {stk_nm}[{stk_cd}] 취소 결과: {cancel_result}")
-        if not TEST_MODE:
-            time.sleep(ORDER_CANCEL_WAIT_SEC)
-
-        # 취소 반영 후 매도가능수량을 다시 확인합니다. 조회 실패 시 보유수량을 기준으로 시도합니다.
-        new_sell_qty = holding_qty
-        if not TEST_MODE:
-            try:
-                bm = _get_balance_map(client, force=True)
-                refreshed_sellable = _sellable_qty_from_balance_map(bm, stk_cd)
-                refreshed_holding = _holding_qty_from_balance_map(bm, stk_cd)
-                if refreshed_holding > 0:
-                    holding_qty = refreshed_holding
-                if refreshed_sellable > 0:
-                    new_sell_qty = refreshed_sellable
-            except Exception as exc:
-                print(f"[{_now()}] [RECOVERY 2/3] {stk_nm}[{stk_cd}] 취소 후 수량 재조회 실패: {exc}")
-
-        if new_sell_qty <= 0:
-            new_sell_qty = holding_qty
-
-        print(
-            f"[{_now()}] [RECOVERY 2/3] {stk_nm}[{stk_cd}] 새 익절 주문 등록 / "
-            f"기준가 {format(new_base_price, ',')}원 / 익절률 {new_tp_pct:.2f}% / "
-            f"새익절 {format(new_tp_price, ',')}원 / 수량 {new_sell_qty}주"
-        )
+    except Exception as exc:
+        print(f"[{_now()}] [DCA실패] {stk_nm}[{stk_cd}] 추가매수 실패: {exc}")
+        # 기존 익절을 취소한 상태일 수 있으므로, 가능한 경우 기존 수량으로 익절을 다시 걸어둡니다.
         try:
-            tp_result = _place_take_profit_sell(client, stk_cd, new_sell_qty, new_tp_price)
-            new_tp_ord_no = _require_valid_order_no(tp_result.get("sell_ord_no"), f"{stk_cd} RECOVERY 익절 지정가 매도 주문")
+            if holding_qty > 0 and old_tp_price > 0:
+                print(f"[{_now()}] [DCA복구] {stk_nm}[{stk_cd}] 기존 평균단가 기준 익절 주문 복구 시도 / 수량 {holding_qty}주 / 가격 {format(old_tp_price, ',')}원")
+                tp_restore = _place_take_profit_sell(client, stk_cd, holding_qty, old_tp_price)
+                item["take_profit_ord_no"] = tp_restore.get("sell_ord_no")
+                item["take_profit_price"] = old_tp_price
+        except Exception as restore_exc:
+            print(f"[{_now()}] [DCA복구실패] {stk_nm}[{stk_cd}] 익절 복구 실패: {restore_exc}")
+        return False
+
+    old_qty = int(holding_qty or item.get("qty", 0) or 0)
+    new_qty = old_qty + add_qty
+    new_avg_price = _calc_weighted_avg_price(old_qty, old_avg_price, add_qty, add_avg_price)
+
+    # DCA 후 익절은 평균단가 기준 고정 익절률로 다시 계산합니다.
+    new_tp_pct = _take_profit_pct(stk_cd)
+    new_tp_price = _calc_take_profit_price_with_pct(new_avg_price, new_tp_pct)
+    new_stop_pct = _stop_loss_pct_by_cycle(stk_cd, next_count)
+    new_stop_price = _calc_stop_loss_price(stk_cd, new_avg_price, next_count)
+
+    print(
+        f"[{_now()}] [DCA 4/5] {stk_nm}[{stk_cd}] 평균단가 재계산 / "
+        f"기존 {old_qty}주@{format(old_avg_price, ',')}원 + "
+        f"추가 {add_qty}주@{format(add_avg_price, ',')}원 -> "
+        f"새수량 {new_qty}주 / 새평균 {format(new_avg_price, ',')}원"
+    )
+
+    if not TEST_MODE:
+        # 체결/잔고 반영 확인. 실패해도 계산 수량으로 익절 등록을 시도합니다.
+        try:
+            sellable = _wait_sellable_qty(client, stk_cd, new_qty, timeout_sec=10.0, poll_sec=1.0)
+            if sellable > 0:
+                new_qty = min(new_qty, sellable)
         except Exception as exc:
-            print(
-                f"[{_now()}] [RECOVERY 실패] {stk_nm}[{stk_cd}] 새 익절 주문 등록 실패: {exc}. "
-                "기존/신규 익절 주문 상태를 확인해야 합니다. 감시는 유지하지만 익절주문번호는 비웁니다."
-            )
-            new_tp_ord_no = None
-    else:
-        new_tp_ord_no = old_tp_ord_no
-        new_tp_price = old_tp_price
-        new_tp_pct = _take_profit_pct_by_cycle(stk_cd, next_count)
+            print(f"[{_now()}] [DCA 4/5] {stk_nm}[{stk_cd}] 매도가능수량 확인 실패: {exc}")
+
+    print(
+        f"[{_now()}] [DCA 5/5] {stk_nm}[{stk_cd}] 새 익절 주문 등록 / "
+        f"평균단가 {format(new_avg_price, ',')}원 / 익절률 {new_tp_pct:.2f}% / "
+        f"새익절 {format(new_tp_price, ',')}원 / 새DCA트리거 {format(new_stop_price, ',')}원 / 수량 {new_qty}주"
+    )
+    try:
+        tp_result = _place_take_profit_sell(client, stk_cd, new_qty, new_tp_price)
+        new_tp_ord_no = _require_valid_order_no(tp_result.get("sell_ord_no"), f"{stk_cd} DCA 익절 지정가 매도 주문")
+    except Exception as exc:
+        print(f"[{_now()}] [DCA실패] {stk_nm}[{stk_cd}] 새 익절 주문 등록 실패: {exc}. 감시는 유지하지만 익절주문번호는 비웁니다.")
+        new_tp_ord_no = None
 
     item["state"] = STATE_RECOVERY
     item["rebuy_count"] = next_count
-    item["strategy_base_price"] = new_base_price
-    # 기존 코드 호환을 위해 buy_avg_price는 전략 기준가로 갱신합니다.
-    # 최초 실제 매입가는 entry_price에 보존합니다.
-    item["buy_avg_price"] = new_base_price
+    item["dca_step"] = next_count
+    item["dca_used_amount"] = int(item.get("dca_used_amount", 0) or 0) + int(add_amount or 0)
+    item["strategy_base_price"] = new_avg_price
+    item["buy_avg_price"] = new_avg_price
     item["entry_price"] = entry_price
     item["take_profit_pct"] = new_tp_pct
     item["take_profit_price"] = new_tp_price
     item["take_profit_ord_no"] = new_tp_ord_no
+    item["stop_loss_pct"] = new_stop_pct
     item["stop_loss_price"] = new_stop_price
-    item["qty"] = holding_qty if holding_qty > 0 else int(item.get("qty", 0))
+    item["qty"] = new_qty
+
+    _log_trade_event(
+        event="DCA_BUY_RESET",
+        stk_cd=stk_cd,
+        stk_nm=stk_nm,
+        qty=add_qty,
+        price=add_avg_price,
+        base_price=new_avg_price,
+        order_no=buy_ord_no,
+        memo="DCA트리거선 터치: DCA 추가매수 후 평균단가 기준 익절 재등록",
+        state=item["state"],
+        cycle=next_count,
+        take_profit_price=new_tp_price,
+        stop_loss_price=new_stop_price,
+        dca_budget=dca_budget,
+        dca_used_amount=item["dca_used_amount"],
+        total_qty=new_qty,
+        avg_price=new_avg_price,
+    )
 
     print(
-        f"[{_now()}] [RECOVERY 3/3] {stk_nm}[{stk_cd}] 재설정 완료 / "
+        f"[{_now()}] [DCA완료] {stk_nm}[{stk_cd}] "
         f"상태 {item['state']} / 최초매입 {format(entry_price, ',')}원 / "
-        f"새기준 {format(new_base_price, ',')}원 / "
+        f"새평균 {format(new_avg_price, ',')}원 / 보유 {new_qty}주 / "
         f"새익절 {format(new_tp_price, ',')}원(+{new_tp_pct:.2f}%) / "
-        f"새손절 {format(new_stop_price, ',')}원(-{_stop_loss_pct(stk_cd):.2f}%) / "
+        f"새DCA트리거 {format(new_stop_price, ',')}원(-{new_stop_pct:.2f}%) / "
+        f"DCA사용 {format(item['dca_used_amount'], ',')}원/{format(int(item.get('dca_reserve_total', 0) or 0), ',')}원 / "
         f"익절주문 {new_tp_ord_no}"
     )
     return True
 
 
 def _place_stop_loss_market_sell(client: KiwoomClient, item: dict[str, Any], sellable_qty: int) -> dict[str, Any]:
-    """손절가 도달 종목만 익절 주문 취소 후 시장가 매도합니다."""
+    """DCA트리거가 도달 종목만 익절 주문 취소 후 시장가 매도합니다."""
     stk_cd = _norm_code(item["stk_cd"])
     stk_nm = str(item.get("stk_nm", stk_cd))
     watch_qty = int(item.get("qty", 0))
@@ -1892,18 +2310,18 @@ def _place_stop_loss_market_sell(client: KiwoomClient, item: dict[str, Any], sel
     if qty <= 0:
         return {"sell_ord_no": None, "reason": "qty <= 0"}
 
-    print(f"[{_now()}] [손절 1/3] {stk_nm}[{stk_cd}] 익절 미체결 주문 취소 시도 / 주문번호 {take_profit_ord_no}")
+    print(f"[{_now()}] [DCA트리거 1/3] {stk_nm}[{stk_cd}] 익절 미체결 주문 취소 시도 / 주문번호 {take_profit_ord_no}")
     cancel_result = _cancel_take_profit_order(client, take_profit_ord_no, stk_cd, qty)
-    print(f"[{_now()}] [손절 1/3] {stk_nm}[{stk_cd}] 익절 주문 취소 결과: {cancel_result}")
+    print(f"[{_now()}] [DCA트리거 1/3] {stk_nm}[{stk_cd}] 익절 주문 취소 결과: {cancel_result}")
 
     extra_cancel_results = []
     # 주문번호 직접 취소가 실패했거나 주문번호가 없는 복구 상황에서만 미체결 조회를 추가 시도합니다.
     if not TEST_MODE and not _cancel_result_looks_ok(cancel_result):
-        print(f"[{_now()}] [손절 보완] {stk_nm}[{stk_cd}] 직접 취소 확인이 불명확하여 동일종목 미체결 매도 주문을 추가 확인합니다.")
+        print(f"[{_now()}] [DCA트리거 보완] {stk_nm}[{stk_cd}] 직접 취소 확인이 불명확하여 동일종목 미체결 매도 주문을 추가 확인합니다.")
         extra_cancel_results = _cancel_before_sell_by_codes(
             client,
             target_codes={stk_cd},
-            reason=f"{stk_cd} 손절 전 동일종목 미체결 매도 취소",
+            reason=f"{stk_cd} DCA트리거 전 동일종목 미체결 매도 취소",
         )
 
     time.sleep(max(1.0, ORDER_CANCEL_WAIT_SEC))
@@ -1915,7 +2333,7 @@ def _place_stop_loss_market_sell(client: KiwoomClient, item: dict[str, Any], sel
         refreshed_sellable_qty = _sellable_qty_from_balance_map(balance_map, stk_cd)
 
     qty = min(qty, refreshed_sellable_qty)
-    print(f"[{_now()}] [손절 2/3] {stk_nm}[{stk_cd}] 취소 후 매도가능수량 확인 / 매도가능 {refreshed_sellable_qty}주 / 실행수량 {qty}주")
+    print(f"[{_now()}] [DCA트리거 2/3] {stk_nm}[{stk_cd}] 취소 후 매도가능수량 확인 / 매도가능 {refreshed_sellable_qty}주 / 실행수량 {qty}주")
 
     if qty <= 0:
         return {
@@ -1927,12 +2345,12 @@ def _place_stop_loss_market_sell(client: KiwoomClient, item: dict[str, Any], sel
 
     if TEST_MODE:
         sell_ord_no = "TEST_STOP_LOSS_MARKET_NOT_SENT"
-        print(f"[{_now()}] [손절 3/3] [TEST] {stk_nm}[{stk_cd}] 시장가 매도 생략 / 가상주문번호 {sell_ord_no} / 수량 {qty}주")
+        print(f"[{_now()}] [DCA트리거 3/3] [TEST] {stk_nm}[{stk_cd}] 시장가 매도 생략 / 가상주문번호 {sell_ord_no} / 수량 {qty}주")
         return {"cancel_result": cancel_result, "extra_cancel_results": extra_cancel_results, "sell_ord_no": sell_ord_no, "qty": qty, "method": "test_place_sell_market_skipped"}
 
     if hasattr(client, "place_sell_market"):
         sell_ord_no = client.place_sell_market(stk_cd, qty)
-        print(f"[{_now()}] [손절 3/3] {stk_nm}[{stk_cd}] 시장가 매도 접수 / 주문번호 {sell_ord_no} / 수량 {qty}주")
+        print(f"[{_now()}] [DCA트리거 3/3] {stk_nm}[{stk_cd}] 시장가 매도 접수 / 주문번호 {sell_ord_no} / 수량 {qty}주")
         return {"cancel_result": cancel_result, "extra_cancel_results": extra_cancel_results, "sell_ord_no": sell_ord_no, "qty": qty, "method": "place_sell_market"}
 
     if hasattr(client, "place_loss_cut_sell"):
@@ -1943,16 +2361,16 @@ def _place_stop_loss_market_sell(client: KiwoomClient, item: dict[str, Any], sel
 
 
 # ===============================
-# 손절 감시
+# DCA 감시
 # ===============================
 
 def _watch_stop_loss(client: KiwoomClient, watch_items: list[dict[str, Any]]) -> None:
     if not watch_items:
-        print(f"[{_now()}] 손절 감시 대상이 없습니다.")
+        print(f"[{_now()}] DCA 감시 대상이 없습니다.")
         return
 
     if not hasattr(client, "place_sell_market") and not hasattr(client, "place_loss_cut_sell"):
-        print(f"[{_now()}] KiwoomClient에 손절 매도 함수가 없어 손절 감시를 시작하지 않습니다.")
+        print(f"[{_now()}] KiwoomClient에 손절 매도 함수가 없어 DCA 감시를 시작하지 않습니다.")
         return
 
     # 감시 항목을 상태 머신 필드로 정규화합니다.
@@ -1965,12 +2383,17 @@ def _watch_stop_loss(client: KiwoomClient, watch_items: list[dict[str, Any]]) ->
             item["state"] = STATE_NORMAL
         if "take_profit_pct" not in item:
             item["take_profit_pct"] = _take_profit_pct_by_cycle(_norm_code(item.get("stk_cd", "")), _rebuy_count(item))
+        # 과거 버전/복구 경로에서 익절 주문번호는 있으나 익절가가 0으로 들어오는 경우가 있어 표시와 판단을 보정합니다.
+        if _safe_int(item.get("take_profit_price"), 0) <= 0:
+            base_for_tp = _strategy_base_price(item) or _safe_int(item.get("buy_avg_price"), 0)
+            if base_for_tp > 0:
+                item["take_profit_price"] = _calc_take_profit_price_with_pct(base_for_tp, float(item.get("take_profit_pct") or _take_profit_pct(_norm_code(item.get("stk_cd", "")))))
     active = {_norm_code(item["stk_cd"]): item for item in watch_items if int(item.get("qty", 0)) > 0}
     last_print_time = 0.0
     virtual_prices: dict[str, int] = {}
 
     print("\n" + "=" * 72)
-    print(f"[{_now()}] 종목별 손절 감시 시작")
+    print(f"[{_now()}] 종목별 DCA 감시 시작")
     print("=" * 72)
     for item in active.values():
         stk_cd = _norm_code(item["stk_cd"])
@@ -1978,23 +2401,23 @@ def _watch_stop_loss(client: KiwoomClient, watch_items: list[dict[str, Any]]) ->
             f"{item['stk_nm']}[{stk_cd}] "
             f"상태 {_item_state(item)} / 감시수량 {item['qty']}주 / "
             f"최초매입 {format(_entry_price(item), ',')}원 / 기준가 {format(_strategy_base_price(item), ',')}원 / "
-            f"익절 {format(_safe_int(item.get('take_profit_price')), ',')}원 / 손절 {format(item['stop_loss_price'], ',')}원 / "
+            f"익절 {format(_safe_int(item.get('take_profit_price')), ',')}원 / DCA트리거 {format(item['stop_loss_price'], ',')}원 / "
             f"회차 {_rebuy_count(item)}/{MAX_REBUY_PER_STOCK} / 익절주문번호 {item.get('take_profit_ord_no')}"
         )
 
     if TEST_MODE:
-        print("[TEST] 손절 감시 현재가는 API 가격이 아니라 종목별 가상 가격을 사용합니다.")
+        print("[TEST] DCA 감시 현재가는 API 가격이 아니라 종목별 가상 가격을 사용합니다.")
         for item in active.values():
             stk_cd = _norm_code(item["stk_cd"])
             print(f"[TEST] {item['stk_nm']}[{stk_cd}] 1초마다 -{_test_down_rate(stk_cd) * 100:.1f}%")
 
-    print("Ctrl+C를 누르면 손절 감시를 중단합니다.")
+    print("Ctrl+C를 누르면 DCA 감시를 중단합니다.")
 
     try:
         while active:
             if _force_exit_time_reached():
                 _print_force_exit_header()
-                print(f"[{_now()}] 손절 감시를 중단하고 전체 청산을 실행합니다.")
+                print(f"[{_now()}] DCA 감시를 중단하고 전체 청산을 실행합니다.")
                 _run_sell_all_mode(client, auto_yes=True)
                 return
 
@@ -2005,7 +2428,7 @@ def _watch_stop_loss(client: KiwoomClient, watch_items: list[dict[str, Any]]) ->
             balance_map = {} if TEST_MODE else _get_balance_map(client)
             if not TEST_MODE and not balance_map:
                 if should_print:
-                    print(f"[{_now()}] 잔고 조회 결과가 비어 있어 이번 손절 감시 회차는 건너뜁니다. 감시 대상은 유지합니다.")
+                    print(f"[{_now()}] 잔고 조회 결과가 비어 있어 이번 DCA 감시 회차는 건너뜁니다. 감시 대상은 유지합니다.")
                     last_print_time = now_ts
                 time.sleep(STOP_LOSS_CHECK_SEC)
                 continue
@@ -2028,6 +2451,27 @@ def _watch_stop_loss(client: KiwoomClient, watch_items: list[dict[str, Any]]) ->
                 if holding_qty <= 0:
                     # 익절 지정가가 체결되어 보유수량이 0주가 된 경우, 마감 전에는 같은 종목을 다시 매수합니다.
                     if TAKE_PROFIT_REBUY_ENABLED and not _force_exit_time_reached() and _can_rebuy(item, "익절 후 재진입 제한"):
+                        tp_price_est = _safe_int(item.get("take_profit_price"), 0)
+                        base_price_est = _strategy_base_price(item)
+                        qty_est = int(item.get("qty", 0) or 0)
+                        profit_est = (tp_price_est - base_price_est) * qty_est if tp_price_est and base_price_est and qty_est else None
+                        profit_pct_est = ((tp_price_est - base_price_est) / base_price_est * 100.0) if tp_price_est and base_price_est else None
+                        _log_trade_event(
+                            event="TAKE_PROFIT_FILLED",
+                            stk_cd=stk_cd,
+                            stk_nm=item["stk_nm"],
+                            qty=qty_est,
+                            price=tp_price_est,
+                            base_price=base_price_est,
+                            order_no=item.get("take_profit_ord_no"),
+                            profit_amount=profit_est,
+                            profit_pct=profit_pct_est,
+                            memo="보유수량 0주: 익절 체결로 추정",
+                            state=_item_state(item),
+                            cycle=_rebuy_count(item),
+                            take_profit_price=tp_price_est,
+                            stop_loss_price=item.get("stop_loss_price"),
+                        )
                         print(
                             f"[{_now()}] [익절체결] {item['stk_nm']}[{stk_cd}] 보유수량 0주 확인 / "
                             f"익절 체결로 판단하고 시장가 재진입을 시도합니다. "
@@ -2050,7 +2494,7 @@ def _watch_stop_loss(client: KiwoomClient, watch_items: list[dict[str, Any]]) ->
 
                     print(
                         f"[{_now()}] {item['stk_nm']}[{stk_cd}] 보유수량이 0주입니다. "
-                        "익절 체결 또는 보유수량 없음으로 판단하여 손절 감시에서 제외합니다."
+                        "익절 체결 또는 보유수량 없음으로 판단하여 DCA 감시에서 제외합니다."
                     )
                     remove_codes.append(stk_cd)
                     continue
@@ -2071,15 +2515,7 @@ def _watch_stop_loss(client: KiwoomClient, watch_items: list[dict[str, Any]]) ->
                     last_price = int(virtual_prices[stk_cd])
 
                     if should_print:
-                        print(
-                            f"[{_now()}] [감시] {item['stk_nm']}[{stk_cd}] "
-                            f"상태 {_item_state(item)} / 현재 {format(last_price, ',')}원 / "
-                            f"최초매입 {format(_entry_price(item), ',')}원({_format_profit_pct(last_price, _entry_price(item))}) / "
-                            f"기준가 {format(_strategy_base_price(item), ',')}원({_format_profit_pct(last_price, _strategy_base_price(item))}) / "
-                            f"익절 {format(_safe_int(item.get('take_profit_price')), ',')}원 / 손절 {format(stop_price, ',')}원까지 {_format_gap_pct(last_price, stop_price)} / "
-                            f"보유 {holding_qty}주 / 매도가능 {_format_sellable_display(sellable_qty, holding_qty, item.get('take_profit_ord_no'))} / "
-                            f"회차 {_rebuy_count(item)}/{MAX_REBUY_PER_STOCK} / 익절주문 {item.get('take_profit_ord_no')} / TEST -{rate * 100:.1f}%"
-                        )
+                        print(_format_watch_line(item, stk_cd, last_price, holding_qty, sellable_qty, extra=f"TEST -{rate * 100:.1f}%"))
                 else:
                     try:
                         last_price = int(client.get_last_price(stk_cd))
@@ -2088,21 +2524,13 @@ def _watch_stop_loss(client: KiwoomClient, watch_items: list[dict[str, Any]]) ->
                         continue
 
                     if should_print:
-                        print(
-                            f"[{_now()}] [감시] {item['stk_nm']}[{stk_cd}] "
-                            f"상태 {_item_state(item)} / 현재 {format(last_price, ',')}원 / "
-                            f"최초매입 {format(_entry_price(item), ',')}원({_format_profit_pct(last_price, _entry_price(item))}) / "
-                            f"기준가 {format(_strategy_base_price(item), ',')}원({_format_profit_pct(last_price, _strategy_base_price(item))}) / "
-                            f"익절 {format(_safe_int(item.get('take_profit_price')), ',')}원 / 손절 {format(stop_price, ',')}원까지 {_format_gap_pct(last_price, stop_price)} / "
-                            f"보유 {holding_qty}주 / 매도가능 {_format_sellable_display(sellable_qty, holding_qty, item.get('take_profit_ord_no'))} / "
-                            f"회차 {_rebuy_count(item)}/{MAX_REBUY_PER_STOCK} / 익절주문 {item.get('take_profit_ord_no')}"
-                        )
+                        print(_format_watch_line(item, stk_cd, last_price, holding_qty, sellable_qty))
 
                 if last_price <= stop_price:
                     current_count = _rebuy_count(item)
                     next_count = current_count + 1
 
-                    # 손절가에 닿아도 즉시 매도하지 않고 현재가 기준으로 익절/손절을 다시 설정합니다.
+                    # DCA트리거가에 닿아도 즉시 매도하지 않고 현재가 기준으로 익절/DCA트리거을 다시 설정합니다.
                     # 단, MAX_REBUY_PER_STOCK에 도달하면 실제 손절 시장가 매도를 실행합니다.
                     if STOP_LOSS_PRICE_RESET_ENABLED and next_count < MAX_REBUY_PER_STOCK and not _force_exit_time_reached():
                         reset_ok = _reset_prices_after_stop_touch(
@@ -2120,10 +2548,30 @@ def _watch_stop_loss(client: KiwoomClient, watch_items: list[dict[str, Any]]) ->
 
                     print(
                         f"[{_now()}] [최종손절] {item['stk_nm']}[{stk_cd}] "
-                        f"현재 {format(last_price, ',')}원 <= 손절 {format(stop_price, ',')}원 / "
+                        f"현재 {format(last_price, ',')}원 <= DCA트리거 {format(stop_price, ',')}원 / "
                         f"회차 {current_count}/{MAX_REBUY_PER_STOCK} / 감시수량 {item['qty']}주 / 상태 {STATE_EXIT}"
                     )
+                    qty_est = int(item.get("qty", 0) or 0)
+                    base_price_est = _strategy_base_price(item)
+                    profit_est = (last_price - base_price_est) * qty_est if last_price and base_price_est and qty_est else None
+                    profit_pct_est = ((last_price - base_price_est) / base_price_est * 100.0) if last_price and base_price_est else None
                     loss_result = _place_stop_loss_market_sell(client, item, sellable_qty)
+                    _log_trade_event(
+                        event="FINAL_STOP_SELL",
+                        stk_cd=stk_cd,
+                        stk_nm=item["stk_nm"],
+                        qty=int(loss_result.get("qty", qty_est) or qty_est),
+                        price=last_price,
+                        base_price=base_price_est,
+                        order_no=loss_result.get("sell_ord_no"),
+                        profit_amount=profit_est,
+                        profit_pct=profit_pct_est,
+                        memo="최대 회차 도달 또는 재설정 실패로 최종 DCA트리거",
+                        state=STATE_EXIT,
+                        cycle=current_count,
+                        take_profit_price=item.get("take_profit_price"),
+                        stop_loss_price=stop_price,
+                    )
                     print(
                         f"[{_now()}] [최종손절완료] {item['stk_nm']}[{stk_cd}] "
                         f"매도주문번호 {loss_result.get('sell_ord_no')} / "
@@ -2143,10 +2591,10 @@ def _watch_stop_loss(client: KiwoomClient, watch_items: list[dict[str, Any]]) ->
             if active:
                 time.sleep(STOP_LOSS_CHECK_SEC)
 
-        print(f"[{_now()}] 모든 손절 감시 대상이 종료되었습니다.")
+        print(f"[{_now()}] 모든 DCA 감시 대상이 종료되었습니다.")
 
     except KeyboardInterrupt:
-        print(f"\n[{_now()}] 사용자 중단(Ctrl+C). 손절 감시를 종료합니다.")
+        print(f"\n[{_now()}] 사용자 중단(Ctrl+C). DCA 감시를 종료합니다.")
 
 
 # ===============================
@@ -2175,7 +2623,7 @@ def _run_restore_mode(client: KiwoomClient, restore_items: list[dict[str, Any]],
     print(f"[{_now()}] 재시작/복구 모드")
     print("=" * 72)
     print("신규 매수는 실행하지 않습니다.")
-    print("입력한 매입가 기준으로 종목별 익절/손절 %를 적용해 익절가와 손절가를 자동 계산합니다.")
+    print("입력한 매입가 기준으로 종목별 익절/DCA트리거 %를 적용해 익절가와 DCA트리거가를 자동 계산합니다.")
     print("※ 복구 실행 시 대상 종목의 기존 익절/예약 미체결 매도 주문을 먼저 취소한 뒤 다시 등록합니다.")
 
     target_codes: set[str] = set()
@@ -2234,11 +2682,11 @@ def _run_restore_mode(client: KiwoomClient, restore_items: list[dict[str, Any]],
             f"보유수량 {item['holding_qty']}주 / "
             f"현재 매도가능수량 {item['sellable_qty_before_cancel']}주 / "
             f"익절 {item['take_profit_pct']:.1f}% -> {format(item['take_profit_price'], ',')}원 / "
-            f"손절 {item['stop_loss_pct']:.1f}% -> {format(item['stop_loss_price'], ',')}원"
+            f"DCA트리거 {item['stop_loss_pct']:.1f}% -> {format(item['stop_loss_price'], ',')}원"
         )
 
     if not auto_yes:
-        if not _confirm_execution("기존 예약 매도 주문을 취소하고, 재시작 모드로 익절 재등록 후 손절 감시를 시작하시겠습니까?"):
+        if not _confirm_execution("기존 예약 매도 주문을 취소하고, 재시작 모드로 익절 재등록 후 DCA 감시를 시작하시겠습니까?"):
             print(f"[{_now()}] 사용자가 실행하지 않음을 선택했습니다. 프로그램을 종료합니다.")
             return
     else:
@@ -2288,10 +2736,10 @@ def _run_restore_mode(client: KiwoomClient, restore_items: list[dict[str, Any]],
             if holding_qty_after > 0:
                 print(
                     f"[{_now()}] {stk_nm}[{stk_cd}] 보유수량은 있으나 매도가능수량이 0주입니다. "
-                    "기존 예약 주문 취소 반영이 늦거나 취소 실패 가능성이 있어 익절 재등록/손절 감시에서 제외합니다."
+                    "기존 예약 주문 취소 반영이 늦거나 취소 실패 가능성이 있어 익절 재등록/DCA 감시에서 제외합니다."
                 )
             else:
-                print(f"[{_now()}] {stk_nm}[{stk_cd}] 보유수량이 없어 익절 재등록/손절 감시에서 제외합니다.")
+                print(f"[{_now()}] {stk_nm}[{stk_cd}] 보유수량이 없어 익절 재등록/DCA 감시에서 제외합니다.")
             continue
 
         try:
@@ -2306,7 +2754,7 @@ def _run_restore_mode(client: KiwoomClient, restore_items: list[dict[str, Any]],
             print(f"[{_now()}] {stk_nm}[{stk_cd}] 복구 익절 지정가 등록 실패: {exc}")
             print(
                 f"[{_now()}] {stk_nm}[{stk_cd}] 익절 주문은 등록되지 않았지만, "
-                "보유수량 보호를 위해 손절 감시는 계속 등록합니다."
+                "보유수량 보호를 위해 DCA 감시는 계속 등록합니다."
             )
 
         stop_watch_items.append(
@@ -2319,13 +2767,21 @@ def _run_restore_mode(client: KiwoomClient, restore_items: list[dict[str, Any]],
                 "stop_loss_price": stop_loss_price,
                 "buy_ord_no": "RESTORE_MODE",
                 "take_profit_ord_no": take_profit_ord_no,
+                "take_profit_price": take_profit_price,
+                "entry_price": buy_avg_price,
+                "strategy_base_price": buy_avg_price,
+                "state": STATE_NORMAL,
+                "rebuy_count": 0,
+                "dca_step": 0,
+                "dca_reserve_total": 0,
+                "dca_used_amount": 0,
             }
         )
 
     if STOP_LOSS_WATCH_ENABLED:
         _watch_stop_loss(client, stop_watch_items)
     else:
-        print(f"[{_now()}] 손절 자동 감시는 비활성화되어 있습니다.")
+        print(f"[{_now()}] DCA트리거 자동 감시는 비활성화되어 있습니다.")
 
 
 # ===============================
@@ -2471,11 +2927,14 @@ def main() -> None:
     print(f"BUY_ORDER_TYPE - {_buy_order_type()} - LIMIT이면 지정가 매수, MARKET이면 시장가 매수로 실행합니다.")
     if _buy_order_type() == "LIMIT":
         print(f"LIMIT_BUY_UP_PCT - {LIMIT_BUY_UP_PCT:.2f}% - 현재가보다 이 비율만큼 높은 가격을 호가단위 올림하여 지정가 매수합니다.")
-    print(f"TAKE_PROFIT_REBUY_ENABLED - {TAKE_PROFIT_REBUY_ENABLED} - 익절 체결 시 같은 종목을 시장가로 재매수합니다.")
-    print(f"STOP_LOSS_PRICE_RESET_ENABLED - {STOP_LOSS_PRICE_RESET_ENABLED} - 손절 도달 시 즉시 매도하지 않고 손절 기준가를 재설정합니다.")
-    print(f"MAX_REBUY_PER_STOCK - {MAX_REBUY_PER_STOCK} - 익절 후 재매수와 손절가 재설정 합산 최대 횟수")
-    print(f"RESET_TAKE_PROFIT_ON_STOP_RESET - {RESET_TAKE_PROFIT_ON_STOP_RESET} - 손절 재설정 시 익절 주문도 새 기준가로 재등록")
-    print(f"DEFAULT_TAKE_PROFIT_SCHEDULE - {DEFAULT_TAKE_PROFIT_SCHEDULE} - 손절 회차별 기본 익절률")
+    print(f"TAKE_PROFIT_REBUY_ENABLED - {TAKE_PROFIT_REBUY_ENABLED} - 익절 체결 시 같은 종목을 재매수합니다.")
+    print(f"INITIAL_ENTRY_CASH_RATE - {INITIAL_ENTRY_CASH_RATE:.2f} - 최초 진입에 사용할 계좌 비율")
+    print(f"DCA_RESERVE_CASH_RATE - {DCA_RESERVE_CASH_RATE:.2f} - DCA 물타기에 남겨둘 계좌 비율")
+    print(f"DCA_BUDGET_WEIGHTS - {DCA_BUDGET_WEIGHTS} - DCA 단계별 예산 가중치")
+    print(f"STOP_LOSS_PRICE_RESET_ENABLED - {STOP_LOSS_PRICE_RESET_ENABLED} - DCA트리거 도달 시 즉시 매도하지 않고 DCA트리거 기준가를 재설정합니다.")
+    print(f"MAX_REBUY_PER_STOCK - {MAX_REBUY_PER_STOCK} - 익절 후 재매수와 DCA트리거가 재설정 합산 최대 횟수")
+    print(f"RESET_TAKE_PROFIT_ON_STOP_RESET - {RESET_TAKE_PROFIT_ON_STOP_RESET} - DCA트리거 재설정 시 익절 주문도 새 기준가로 재등록")
+    print(f"DEFAULT_TAKE_PROFIT_SCHEDULE - {DEFAULT_TAKE_PROFIT_SCHEDULE} - DCA트리거 회차별 기본 익절률")
     print(f"FORCE_EXIT_ENABLED - {FORCE_EXIT_ENABLED} / FORCE_EXIT_TIME - {FORCE_EXIT_TIME} - 시간이 되면 전체 청산 후 종료합니다.")
 
     BaseURL = KIWOOM_URL.strip() or os.getenv("KIWOOM_URL", "https://mockapi.kiwoom.com")
@@ -2522,7 +2981,7 @@ def main() -> None:
     if args.yes:
         print(f"\n[{_now()}] --yes 옵션이 있어 확인 질문 없이 주문을 시작합니다.")
     else:
-        if not _confirm_execution("위 내용으로 50 / 50 매수를 실행하시겠습니까?"):
+        if not _confirm_execution("위 내용으로 최초 50% 진입 매수를 실행하시겠습니까?"):
             print(f"[{_now()}] 사용자가 실행하지 않음을 선택했습니다. 프로그램을 종료합니다.")
             return
         print(f"\n[{_now()}] 사용자가 실행을 승인했습니다. 주문을 시작합니다.")
@@ -2605,6 +3064,20 @@ def main() -> None:
             "take_profit_ord_no": take_profit_ord_no,
         }
         results.append(result)
+        _log_trade_event(
+            event="BUY",
+            stk_cd=stk_cd,
+            stk_nm=stk_nm,
+            qty=filled_qty,
+            price=buy_avg_price,
+            base_price=buy_avg_price,
+            order_no=buy_ord_no,
+            memo="최초 매수",
+            state=STATE_NORMAL,
+            cycle=0,
+            take_profit_price=take_profit_price,
+            stop_loss_price=stop_loss_price,
+        )
 
         stop_watch_items.append(
             {
@@ -2612,6 +3085,15 @@ def main() -> None:
                 "stk_cd": stk_cd,
                 "qty": filled_qty,
                 "buy_avg_price": buy_avg_price,
+                "entry_price": buy_avg_price,
+                "strategy_base_price": buy_avg_price,
+                "state": STATE_NORMAL,
+                "rebuy_count": 0,
+                "dca_step": 0,
+                "dca_reserve_total": int(plan.get("dca_reserve_budget", 0) or 0),
+                "dca_used_amount": 0,
+                "take_profit_pct": take_profit_pct,
+                "take_profit_price": take_profit_price,
                 "stop_loss_pct": stop_loss_pct,
                 "stop_loss_price": stop_loss_price,
                 "buy_ord_no": buy_ord_no,
@@ -2624,7 +3106,7 @@ def main() -> None:
             f"체결가 {format(buy_avg_price, ',')}원 / 수량 {filled_qty}주 / "
             f"익절주문번호 {take_profit_ord_no} / "
             f"익절가 {format(take_profit_price, ',')}원(+{take_profit_pct:.1f}%) / "
-            f"손절감시가 {format(stop_loss_price, ',')}원(-{stop_loss_pct:.1f}%)"
+            f"DCA트리거감시가 {format(stop_loss_price, ',')}원(-{stop_loss_pct:.1f}%)"
         )
 
     print(f"\n[{_now()}] 주문 등록 결과")
@@ -2636,7 +3118,7 @@ def main() -> None:
                 f"- {item['stk_nm']}[{item['stk_cd']}] "
                 f"{item['qty']}주 / 매수가 {format(item['buy_avg_price'], ',')}원 / "
                 f"익절 {item['take_profit_pct']:.1f}% {format(item['take_profit_price'], ',')}원 / "
-                f"손절 {item['stop_loss_pct']:.1f}% {format(item['stop_loss_price'], ',')}원 / "
+                f"DCA트리거 {item['stop_loss_pct']:.1f}% {format(item['stop_loss_price'], ',')}원 / "
                 f"매수주문번호 {item['buy_ord_no']} / 익절주문번호 {item['take_profit_ord_no']}"
             )
 
@@ -2649,8 +3131,9 @@ def main() -> None:
     if STOP_LOSS_WATCH_ENABLED:
         _watch_stop_loss(client, stop_watch_items)
     else:
-        print(f"[{_now()}] 손절 자동 감시는 비활성화되어 있습니다. STOP_LOSS_WATCH_ENABLED=True로 변경하면 감시를 시작합니다.")
+        print(f"[{_now()}] DCA트리거 자동 감시는 비활성화되어 있습니다. STOP_LOSS_WATCH_ENABLED=True로 변경하면 감시를 시작합니다.")
 
+    _print_trade_report()
     print(f"[{_now()}] 완료")
     _close_log_tee()
 
