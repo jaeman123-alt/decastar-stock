@@ -301,7 +301,7 @@ STOP_LOSS_REBUY_ENABLED: bool = STOP_LOSS_PRICE_RESET_ENABLED
 
 # 종목별 최대 재진입/DCA트리거가 재설정 횟수입니다.
 # 익절 후 재매수와 DCA트리거가 재설정을 합산해서 관리합니다.
-MAX_REBUY_PER_STOCK: int = 10
+MAX_REBUY_PER_STOCK: int = 100
 
 # DCA트리거 재설정 회차별 익절률입니다.
 # 예: 0회차는 기본 익절률, DCA트리거 재설정이 누적될수록 목표 익절률을 낮춰 반등 탈출 가능성을 높입니다.
@@ -331,7 +331,7 @@ REBUY_WAIT_SEC: float = 3.0
 # 마감 청산 설정
 # True이면 FORCE_EXIT_TIME에 도달하는 순간 미체결 주문을 취소하고 모든 보유종목을 시장가 청산한 뒤 종료합니다.
 FORCE_EXIT_ENABLED: bool = True
-FORCE_EXIT_TIME: str = "15:20"
+FORCE_EXIT_TIME: str = "15:15"
 
 # API 과호출 방지: 잔고조회(kt00018)는 최소 간격을 둡니다.
 BALANCE_QUERY_MIN_INTERVAL_SEC: float = 3.0
