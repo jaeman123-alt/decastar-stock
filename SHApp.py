@@ -1,10 +1,28 @@
 # ===============================
 # file: SHApp_kodex_leverage_oto_state_machine.py
-# version : 2.3.0
+# version : 2.6.0
 # ===============================
 # python SHApp_kodex_leverage_oto.py
 #
 # 기능 요약
+# v2.6.0
+#   - DCA 추가매수 예산을 고정 예비예산만이 아니라 실제 계좌 주문가능금액 기준으로 계산 가능
+#   - DCA_USE_ACCOUNT_CASH=True이면 주문 직전 주문가능금액의 일부를 사용해 하락장에서 추가매수 수량을 확대
+#   - 종목별 예산 독식을 막기 위해 1회 DCA 주문 상한/최소 잔여현금/예약예산 상한 옵션 추가
+#
+# v2.5.0
+#   - DCA 후 익절 주문은 반드시 기존 보유 + 추가매수 전체 수량 기준
+#   - 매도가능수량이 추가매수분만 보이면 바로 익절 등록하지 않음
+#   - 숨은 미체결 매도 주문 재확인/취소 후 다시 대기
+#   - 그래도 전체 수량이 매도가능하지 않으면 일부 수량 익절 주문을 막고 감시 유지
+#
+# v2.4.0
+#       - 익절 후 재진입은 DCA 카운트에 포함하지 않음
+#       - MAX_REBUY_PER_STOCK=100이면 DCA 표시도 10/100, 11/100처럼 동작
+#       - 10단계 이후에는 마지막 DCA 가중치를 반복 사용
+#       - DCA 예산이 부족하면 최종손절하지 않고 추가매수 없이 DCA 트리거만 아래로 조정
+#       - 거래 리포트에서 DCA 매수 횟수가 0으로 나오던 문제 수정
+
 # v2.2.0
 #    - 최초 계좌금액의 50%만 진입하고, 나머지 50%는 10단계 물타기 예산으로 보관합니다.
 #    - DCA트리거선 터치 시 즉시 매도하지 않고 단계별 추가매수(DCA)를 실행합니다.
@@ -263,6 +281,27 @@ DCA_ON_STOP_TOUCH_ENABLED: bool = True
 # 후반으로 갈수록 더 큰 금액을 투입해 평균단가 인하 효과를 키우는 구조입니다.
 DCA_BUDGET_WEIGHTS: list[float] = [1, 1, 2, 2, 3, 4, 5, 6, 8, 10]
 
+# DCA 추가매수 예산 산정 방식입니다.
+# False: 최초 실행 시 계산한 DCA 예비예산(dca_reserve_total)을 단계별 가중치로 나눠 사용합니다.
+# True : DCA 실행 직전의 실제 계좌 주문가능금액을 조회하여 추가매수 예산을 계산합니다.
+#        하락장에서 예비예산은 충분한데 단계예산이 작아 1~2주만 사는 문제를 줄입니다.
+DCA_USE_ACCOUNT_CASH: bool = True
+
+# 실제 주문가능금액 기반 DCA일 때, 현재 주문가능금액 중 한 종목 1회 DCA에 사용할 최대 비율입니다.
+# 예: 주문가능금액 3,000,000원, 종목 weight 0.5, 비율 0.70이면 최대 1,050,000원 사용.
+DCA_ACCOUNT_CASH_USE_RATE: float = 0.70
+
+# 안전하게 남겨둘 최소 주문가능금액입니다. 수수료/호가 변동/다른 종목 DCA를 위해 완전 소진을 막습니다.
+DCA_MIN_REMAINING_CASH: int = 100_000
+
+# 실제 주문가능금액 기반이어도 종목별 최초 DCA 예비예산의 몇 배까지 1회 주문을 허용할지 제한합니다.
+# 0이면 이 제한을 사용하지 않습니다. 1.0이면 최초 해당 종목 DCA 예비예산을 1회 주문 상한으로 둡니다.
+DCA_MAX_ORDER_BY_RESERVE_RATE: float = 1.0
+
+# 실제 주문가능금액 기반 예산과 기존 단계별 예산 중 더 큰 금액을 사용할지 여부입니다.
+# True 권장: 하락장에서 실제 현금이 충분하면 추가매수 수량을 늘립니다.
+DCA_USE_MAX_OF_STEP_AND_ACCOUNT_BUDGET: bool = True
+
 # +4 / -3 실험 설정
 # 여기서 -3은 실제 손절 매도폭이 아니라 DCA 추가매수 트리거입니다.
 # 가격이 기준가 대비 -3% 도달하면 익절 주문을 취소하고 DCA 추가매수 후 평균단가 기준으로 익절을 다시 등록합니다.
@@ -293,14 +332,15 @@ TAKE_PROFIT_REBUY_SAME_QTY: bool = True
 # EXIT     : 최대 재설정/재진입 횟수 도달 또는 마감 청산
 
 # True이면 DCA트리거가에 도달해도 즉시 매도하지 않고, 현재가 기준으로 익절/DCA트리거 가격을 다시 설정합니다.
-# 단, MAX_REBUY_PER_STOCK 횟수에 도달하면 실제 시장가 손절 매도를 실행합니다.
+# 단, MAX_REBUY_PER_STOCK 횟수에 도달하면 실제 시장가 손절 매도를 실행합니다. 익절 후 재진입은 이 횟수에 포함하지 않습니다.
 STOP_LOSS_PRICE_RESET_ENABLED: bool = True
 
 # 구버전 호환용 이름입니다. 새 코드에서는 STOP_LOSS_PRICE_RESET_ENABLED를 사용합니다.
 STOP_LOSS_REBUY_ENABLED: bool = STOP_LOSS_PRICE_RESET_ENABLED
 
-# 종목별 최대 재진입/DCA트리거가 재설정 횟수입니다.
-# 익절 후 재매수와 DCA트리거가 재설정을 합산해서 관리합니다.
+# 종목별 최대 DCA트리거 처리 횟수입니다.
+# 익절 후 재진입은 이 횟수에 포함하지 않습니다.
+# 값을 크게 잡으면 횟수 제한으로 인한 최종손절은 거의 발생하지 않고, DCA 예산이 소진되면 추가매수 없이 익절/마감청산을 기다립니다.
 MAX_REBUY_PER_STOCK: int = 100
 
 # DCA트리거 재설정 회차별 익절률입니다.
@@ -493,6 +533,8 @@ def _print_trade_report() -> None:
                 "TAKE_PROFIT_FILLED": 0,
                 "REBUY": 0,
                 "STOP_RESET": 0,
+                "DCA_BUY_RESET": 0,
+                "DCA_TRIGGER_NO_BUY": 0,
                 "FINAL_STOP_SELL": 0,
                 "SELL_ALL": 0,
                 "profit": 0,
@@ -517,7 +559,8 @@ def _print_trade_report() -> None:
         print(
             f"- {info['name']}[{code}] "
             f"매수 {info['BUY']}회 / 재매수 {info['REBUY']}회 / 익절추정 {info['TAKE_PROFIT_FILLED']}회 / "
-            f"DCA트리거재설정 {info['STOP_RESET']}회 / 최종손절 {info['FINAL_STOP_SELL']}회 / 전체청산 {info['SELL_ALL']}회"
+            f"DCA매수 {info['DCA_BUY_RESET']}회 / DCA무매수 {info['DCA_TRIGGER_NO_BUY']}회 / "
+            f"최종손절 {info['FINAL_STOP_SELL']}회 / 전체청산 {info['SELL_ALL']}회"
             f"{profit_text}"
         )
 
@@ -989,8 +1032,13 @@ def _wait_sellable_qty(
             f"[{_now()}] {target_code} 매도가능수량 반영 대기 {poll_count}회차 / "
             f"확인수량 {last_qty}주 / 기대수량 {expected_qty}주"
         )
-        if last_qty > 0:
-            return min(last_qty, expected_qty) if expected_qty > 0 else last_qty
+        # 기대수량 전체가 매도가능해질 때까지 기다립니다.
+        # 기존 익절 주문 취소 직후에는 추가매수분만 먼저 매도가능으로 잡히는 경우가 있습니다.
+        # 여기서 양수라고 바로 반환하면 DCA 후 익절 주문이 추가매수 수량만큼만 등록될 수 있습니다.
+        if expected_qty <= 0 and last_qty > 0:
+            return last_qty
+        if expected_qty > 0 and last_qty >= expected_qty:
+            return last_qty
         time.sleep(poll_sec)
 
     return last_qty
@@ -1810,7 +1858,7 @@ def _can_rebuy(item: dict[str, Any], reason: str) -> bool:
     if cnt >= MAX_REBUY_PER_STOCK:
         print(
             f"[{_now()}] [재진입중단] {item.get('stk_nm', '')}[{item.get('stk_cd', '')}] "
-            f"{reason} / 재매수 횟수 {cnt}/{MAX_REBUY_PER_STOCK} 도달"
+            f"{reason} / DCA 횟수 {cnt}/{MAX_REBUY_PER_STOCK} 도달"
         )
         return False
     return True
@@ -1850,7 +1898,7 @@ def _place_market_rebuy_then_takeprofit(client: KiwoomClient, item: dict[str, An
             order_no=buy_ord_no,
             memo=f"{reason} TEST 재매수",
             state=STATE_NORMAL,
-            cycle=int(item.get("rebuy_count", 0)) + 1,
+            cycle=int(item.get("rebuy_count", 0)),
             take_profit_price=take_profit_price,
             stop_loss_price=_calc_stop_loss_price(stk_cd, buy_avg_price, 0),
         )
@@ -1867,7 +1915,7 @@ def _place_market_rebuy_then_takeprofit(client: KiwoomClient, item: dict[str, An
             "take_profit_price": take_profit_price,
             "stop_loss_pct": _stop_loss_pct(stk_cd),
             "stop_loss_price": _calc_stop_loss_price(stk_cd, buy_avg_price),
-            "rebuy_count": int(item.get("rebuy_count", 0)) + 1,
+            "rebuy_count": 0,
             "dca_step": 0,
             "dca_reserve_total": int(item.get("dca_reserve_total", 0) or 0),
             "dca_used_amount": 0,
@@ -1875,7 +1923,7 @@ def _place_market_rebuy_then_takeprofit(client: KiwoomClient, item: dict[str, An
 
     print(
         f"[{_now()}] [재진입 1/4] {stk_nm}[{stk_cd}] {reason} → 시장가 재매수 시작 / "
-        f"요청수량 {prev_qty}주 / 재매수횟수 {_rebuy_count(item) + 1}/{MAX_REBUY_PER_STOCK}"
+        f"요청수량 {prev_qty}주 / 익절 후 재진입은 DCA 카운트에 포함하지 않음"
     )
     buy_ord_no, actual_order_qty = _place_buy_market_with_retry(client, stk_cd, prev_qty)
     print(f"[{_now()}] [재진입 1/4] {stk_nm}[{stk_cd}] 시장가 재매수 주문 접수 / 주문번호 {buy_ord_no} / 수량 {actual_order_qty}주")
@@ -1939,7 +1987,7 @@ def _place_market_rebuy_then_takeprofit(client: KiwoomClient, item: dict[str, An
         order_no=buy_ord_no,
         memo=reason,
         state=STATE_NORMAL,
-        cycle=int(item.get("rebuy_count", 0)) + 1,
+        cycle=int(item.get("rebuy_count", 0)),
         take_profit_price=take_profit_price,
         stop_loss_price=stop_loss_price,
     )
@@ -1957,7 +2005,7 @@ def _place_market_rebuy_then_takeprofit(client: KiwoomClient, item: dict[str, An
         "take_profit_price": take_profit_price,
         "stop_loss_pct": _stop_loss_pct(stk_cd),
         "stop_loss_price": stop_loss_price,
-        "rebuy_count": int(item.get("rebuy_count", 0)) + 1,
+        "rebuy_count": 0,
         "dca_step": 0,
         "dca_reserve_total": int(item.get("dca_reserve_total", 0) or 0),
         "dca_used_amount": 0,
@@ -2045,7 +2093,7 @@ def _format_watch_line(item: dict[str, Any], stk_cd: str, last_price: int, holdi
         f"DCA {format(trigger_price, ',')}원({_format_dca_trigger_gap_pct(last_price, trigger_price)})",
         f"보유 {holding_qty}주",
         f"매도가능 {sellable_text}",
-        f"DCA {int(item.get('dca_step', _rebuy_count(item)) or 0)}/{len(DCA_BUDGET_WEIGHTS)}",
+        f"DCA {int(item.get('dca_step', _rebuy_count(item)) or 0)}/{MAX_REBUY_PER_STOCK}",
     ]
     if dca_total > 0:
         parts.append(f"DCA예산 {format(dca_used, ',')}/{format(dca_total, ',')}원")
@@ -2062,19 +2110,77 @@ def _dca_weight_sum() -> float:
 
 
 def _dca_step_budget(item: dict[str, Any], step_index: int) -> int:
-    """step_index는 0부터 시작합니다."""
+    """기존 방식의 DCA 단계별 예산입니다. step_index는 0부터 시작합니다."""
     reserve_total = int(item.get("dca_reserve_total", 0) or 0)
     used = int(item.get("dca_used_amount", 0) or 0)
     if reserve_total <= 0:
         return 0
     if step_index < 0:
         step_index = 0
-    if step_index >= len(DCA_BUDGET_WEIGHTS):
+    # DCA_BUDGET_WEIGHTS는 기본 10단계 예산 배분표입니다.
+    # MAX_REBUY_PER_STOCK을 10보다 크게 두면 10단계 이후에는 마지막 가중치를 반복 사용하되,
+    # 남은 DCA 예비예산을 초과하지 않습니다.
+    if not DCA_BUDGET_WEIGHTS:
         return 0
-    weight = float(DCA_BUDGET_WEIGHTS[step_index])
+    if step_index >= len(DCA_BUDGET_WEIGHTS):
+        weight = float(DCA_BUDGET_WEIGHTS[-1])
+    else:
+        weight = float(DCA_BUDGET_WEIGHTS[step_index])
     budget = int(reserve_total * weight / _dca_weight_sum())
     remaining = max(0, reserve_total - used)
     return min(budget, remaining)
+
+
+def _dca_account_cash_budget(client: KiwoomClient, item: dict[str, Any], stk_cd: str) -> int:
+    """DCA 실행 직전 실제 주문가능금액 기준 예산을 계산합니다.
+
+    하락장에서는 기존 단계예산이 너무 작아 평균단가 인하 효과가 약해질 수 있습니다.
+    이 함수는 현재 계좌 주문가능금액을 조회한 뒤 종목 weight, 사용비율, 최소 잔여현금,
+    종목별 예약예산 상한을 모두 반영하여 1회 DCA 예산을 산정합니다.
+    """
+    if TEST_MODE:
+        return 0
+
+    try:
+        cur_entr = _safe_int(client.get_current_entr(), 0)
+    except Exception as exc:
+        print(f"[{_now()}] {stk_cd} DCA 주문가능금액 조회 실패: {exc}")
+        return 0
+
+    available = max(0, cur_entr - int(DCA_MIN_REMAINING_CASH or 0))
+    if available <= 0:
+        return 0
+
+    weight = float(_target_by_code(stk_cd).get("weight", 1.0) or 1.0)
+    budget = int(available * weight * float(DCA_ACCOUNT_CASH_USE_RATE))
+
+    reserve_total = int(item.get("dca_reserve_total", 0) or 0)
+    if DCA_MAX_ORDER_BY_RESERVE_RATE and DCA_MAX_ORDER_BY_RESERVE_RATE > 0 and reserve_total > 0:
+        budget = min(budget, int(reserve_total * float(DCA_MAX_ORDER_BY_RESERVE_RATE)))
+
+    return max(0, budget)
+
+
+def _dca_budget(client: KiwoomClient, item: dict[str, Any], stk_cd: str, step_index: int) -> tuple[int, int, int, str]:
+    """최종 DCA 예산을 반환합니다.
+
+    반환값: (최종예산, 기존단계예산, 실제계좌예산, 예산산정방식)
+    """
+    step_budget = _dca_step_budget(item, step_index)
+    account_budget = _dca_account_cash_budget(client, item, stk_cd) if DCA_USE_ACCOUNT_CASH else 0
+
+    if DCA_USE_ACCOUNT_CASH:
+        if DCA_USE_MAX_OF_STEP_AND_ACCOUNT_BUDGET:
+            final_budget = max(step_budget, account_budget)
+            mode = "ACCOUNT_MAX"
+        else:
+            final_budget = account_budget
+            mode = "ACCOUNT_ONLY"
+    else:
+        final_budget = step_budget
+        mode = "STEP_ONLY"
+
+    return max(0, int(final_budget)), int(step_budget), int(account_budget), mode
 
 
 def _calc_weighted_avg_price(old_qty: int, old_avg: int, add_qty: int, add_price: int) -> int:
@@ -2170,21 +2276,54 @@ def _reset_prices_after_stop_touch(
 
     if next_count > MAX_REBUY_PER_STOCK:
         return False
-    if DCA_ON_STOP_TOUCH_ENABLED and current_count >= len(DCA_BUDGET_WEIGHTS):
-        return False
-
-    dca_budget = _dca_step_budget(item, current_count)
+    dca_budget, step_budget, account_budget, budget_mode = _dca_budget(client, item, stk_cd, current_count)
 
     print(
         f"[{_now()}] [DCA] {stk_nm}[{stk_cd}] DCA트리거선 터치 / "
         f"현재 {format(last_price, ',')}원 <= 기존DCA트리거 {format(old_stop_price, ',')}원 / "
         f"최초매입대비 {_format_profit_pct(last_price, entry_price)} / "
-        f"DCA단계 {next_count}/{MAX_REBUY_PER_STOCK} / 단계예산 {format(dca_budget, ',')}원"
+        f"DCA단계 {next_count}/{MAX_REBUY_PER_STOCK} / "
+        f"최종예산 {format(dca_budget, ',')}원 / 단계예산 {format(step_budget, ',')}원 / "
+        f"실계좌예산 {format(account_budget, ',')}원 / 방식 {budget_mode}"
     )
 
-    if dca_budget <= 0:
-        print(f"[{_now()}] [DCA중단] {stk_nm}[{stk_cd}] 남은 DCA 예산이 없어 최종 DCA트리거 대상으로 전환합니다.")
-        return False
+    # 예산이 없거나 1주도 살 수 없으면 익절 주문은 건드리지 않고 DCA트리거선만 더 아래로 조정합니다.
+    # 이 경우도 손절/DCA 트리거 1회로 집계하지만, 최종손절로 넘기지는 않습니다.
+    estimated_buy_price = _calc_limit_buy_price(stk_cd, last_price) if (_buy_order_type() == "LIMIT") else last_price
+    if dca_budget <= 0 or estimated_buy_price <= 0 or dca_budget < estimated_buy_price:
+        new_stop_pct = _stop_loss_pct_by_cycle(stk_cd, next_count)
+        new_stop_price = _calc_stop_loss_price(stk_cd, old_avg_price, next_count)
+        item["state"] = STATE_RECOVERY
+        item["rebuy_count"] = next_count
+        item["dca_step"] = next_count
+        item["stop_loss_pct"] = new_stop_pct
+        item["stop_loss_price"] = new_stop_price
+        item["dca_budget_exhausted"] = True
+        _log_trade_event(
+            event="DCA_TRIGGER_NO_BUY",
+            stk_cd=stk_cd,
+            stk_nm=stk_nm,
+            qty=0,
+            price=last_price,
+            base_price=old_avg_price,
+            order_no="",
+            memo="DCA트리거선 터치: DCA 예산 부족 또는 1주 미만으로 추가매수 없이 다음 트리거만 조정",
+            state=item["state"],
+            cycle=next_count,
+            take_profit_price=old_tp_price,
+            stop_loss_price=new_stop_price,
+            dca_budget=dca_budget,
+            dca_used_amount=item.get("dca_used_amount", 0),
+            total_qty=holding_qty,
+            avg_price=old_avg_price,
+        )
+        print(
+            f"[{_now()}] [DCA예산부족] {stk_nm}[{stk_cd}] "
+            f"단계예산 {format(dca_budget, ',')}원 / 예상주문가 {format(estimated_buy_price, ',')}원으로 1주 매수 불가. "
+            f"추가매수 없이 DCA트리거만 {format(new_stop_price, ',')}원(-{new_stop_pct:.2f}%)으로 조정합니다. "
+            f"회차 {next_count}/{MAX_REBUY_PER_STOCK}"
+        )
+        return True
 
     print(
         f"[{_now()}] [DCA 1/5] {stk_nm}[{stk_cd}] 기존 익절 주문 취소 / "
@@ -2214,7 +2353,8 @@ def _reset_prices_after_stop_touch(
                 item["take_profit_price"] = old_tp_price
         except Exception as restore_exc:
             print(f"[{_now()}] [DCA복구실패] {stk_nm}[{stk_cd}] 익절 복구 실패: {restore_exc}")
-        return False
+        # 추가매수가 실패해도 바로 최종손절하지 않고 기존 감시를 유지합니다.
+        return True
 
     old_qty = int(holding_qty or item.get("qty", 0) or 0)
     new_qty = old_qty + add_qty
@@ -2234,11 +2374,46 @@ def _reset_prices_after_stop_touch(
     )
 
     if not TEST_MODE:
-        # 체결/잔고 반영 확인. 실패해도 계산 수량으로 익절 등록을 시도합니다.
+        # 체결/잔고 반영 확인. 전체 보유수량이 매도가능해질 때까지 기다립니다.
+        # 일부 증권사/모의투자에서는 기존 익절 취소 반영보다 추가매수분 반영이 먼저 들어와
+        # 매도가능수량이 add_qty만 보이는 순간이 있습니다. 그 수량으로 익절을 걸면
+        # 전체 보유가 아니라 추가매수분만 익절 예약되는 문제가 생깁니다.
         try:
-            sellable = _wait_sellable_qty(client, stk_cd, new_qty, timeout_sec=10.0, poll_sec=1.0)
-            if sellable > 0:
-                new_qty = min(new_qty, sellable)
+            sellable = _wait_sellable_qty(client, stk_cd, new_qty, timeout_sec=15.0, poll_sec=1.0)
+            if sellable < new_qty:
+                print(
+                    f"[{_now()}] [DCA 4/5] {stk_nm}[{stk_cd}] 전체수량 매도가능 대기 미완료 / "
+                    f"매도가능 {sellable}주 / 목표 {new_qty}주. 숨은 미체결 매도 주문을 추가 확인합니다."
+                )
+                _cancel_before_sell_by_codes(
+                    client,
+                    target_codes={stk_cd},
+                    reason=f"{stk_cd} DCA 후 전체수량 익절 재등록 전 미체결 매도 재확인",
+                )
+                sellable = _wait_sellable_qty(client, stk_cd, new_qty, timeout_sec=15.0, poll_sec=1.0)
+
+            if sellable < new_qty:
+                # 전체 수량으로 익절을 못 걸면 일부 수량 익절은 더 위험합니다.
+                # 기존 보유분 일부가 무방비로 남을 수 있으므로, 익절 주문을 등록하지 않고 감시를 유지합니다.
+                print(
+                    f"[{_now()}] [DCA보류] {stk_nm}[{stk_cd}] 전체 보유수량 {new_qty}주 중 "
+                    f"매도가능 {sellable}주만 확인되어 새 익절 주문 등록을 보류합니다. 다음 감시 루프에서 다시 처리합니다."
+                )
+                item["state"] = STATE_RECOVERY
+                item["rebuy_count"] = next_count
+                item["dca_step"] = next_count
+                item["dca_used_amount"] = int(item.get("dca_used_amount", 0) or 0) + int(add_amount or 0)
+                item["strategy_base_price"] = new_avg_price
+                item["buy_avg_price"] = new_avg_price
+                item["entry_price"] = entry_price
+                item["take_profit_pct"] = new_tp_pct
+                item["take_profit_price"] = new_tp_price
+                item["take_profit_ord_no"] = None
+                item["stop_loss_pct"] = new_stop_pct
+                item["stop_loss_price"] = new_stop_price
+                item["qty"] = new_qty
+                item["take_profit_pending_qty"] = new_qty
+                return True
         except Exception as exc:
             print(f"[{_now()}] [DCA 4/5] {stk_nm}[{stk_cd}] 매도가능수량 확인 실패: {exc}")
 
@@ -2450,7 +2625,7 @@ def _watch_stop_loss(client: KiwoomClient, watch_items: list[dict[str, Any]]) ->
 
                 if holding_qty <= 0:
                     # 익절 지정가가 체결되어 보유수량이 0주가 된 경우, 마감 전에는 같은 종목을 다시 매수합니다.
-                    if TAKE_PROFIT_REBUY_ENABLED and not _force_exit_time_reached() and _can_rebuy(item, "익절 후 재진입 제한"):
+                    if TAKE_PROFIT_REBUY_ENABLED and not _force_exit_time_reached():
                         tp_price_est = _safe_int(item.get("take_profit_price"), 0)
                         base_price_est = _strategy_base_price(item)
                         qty_est = int(item.get("qty", 0) or 0)
@@ -2475,7 +2650,7 @@ def _watch_stop_loss(client: KiwoomClient, watch_items: list[dict[str, Any]]) ->
                         print(
                             f"[{_now()}] [익절체결] {item['stk_nm']}[{stk_cd}] 보유수량 0주 확인 / "
                             f"익절 체결로 판단하고 시장가 재진입을 시도합니다. "
-                            f"재매수횟수 {_rebuy_count(item)}/{MAX_REBUY_PER_STOCK}"
+                            f"DCA카운트 {_rebuy_count(item)}/{MAX_REBUY_PER_STOCK} 유지"
                         )
                         try:
                             new_item = _place_market_rebuy_then_takeprofit(client, item, reason="익절 후 재진입")
@@ -2532,7 +2707,7 @@ def _watch_stop_loss(client: KiwoomClient, watch_items: list[dict[str, Any]]) ->
 
                     # DCA트리거가에 닿아도 즉시 매도하지 않고 현재가 기준으로 익절/DCA트리거을 다시 설정합니다.
                     # 단, MAX_REBUY_PER_STOCK에 도달하면 실제 손절 시장가 매도를 실행합니다.
-                    if STOP_LOSS_PRICE_RESET_ENABLED and next_count < MAX_REBUY_PER_STOCK and not _force_exit_time_reached():
+                    if STOP_LOSS_PRICE_RESET_ENABLED and next_count <= MAX_REBUY_PER_STOCK and not _force_exit_time_reached():
                         reset_ok = _reset_prices_after_stop_touch(
                             client=client,
                             item=item,
@@ -2930,9 +3105,12 @@ def main() -> None:
     print(f"TAKE_PROFIT_REBUY_ENABLED - {TAKE_PROFIT_REBUY_ENABLED} - 익절 체결 시 같은 종목을 재매수합니다.")
     print(f"INITIAL_ENTRY_CASH_RATE - {INITIAL_ENTRY_CASH_RATE:.2f} - 최초 진입에 사용할 계좌 비율")
     print(f"DCA_RESERVE_CASH_RATE - {DCA_RESERVE_CASH_RATE:.2f} - DCA 물타기에 남겨둘 계좌 비율")
-    print(f"DCA_BUDGET_WEIGHTS - {DCA_BUDGET_WEIGHTS} - DCA 단계별 예산 가중치")
+    print(f"DCA_BUDGET_WEIGHTS - {DCA_BUDGET_WEIGHTS} - 기본 DCA 단계별 예산 가중치. MAX가 더 크면 마지막 가중치를 반복합니다.")
+    print(f"DCA_USE_ACCOUNT_CASH - {DCA_USE_ACCOUNT_CASH} - True이면 DCA 추가매수 예산을 실제 주문가능금액 기준으로 계산합니다.")
+    if DCA_USE_ACCOUNT_CASH:
+        print(f"DCA_ACCOUNT_CASH_USE_RATE - {DCA_ACCOUNT_CASH_USE_RATE:.2f} / DCA_MIN_REMAINING_CASH - {format(DCA_MIN_REMAINING_CASH, ',')}원 / DCA_MAX_ORDER_BY_RESERVE_RATE - {DCA_MAX_ORDER_BY_RESERVE_RATE}")
     print(f"STOP_LOSS_PRICE_RESET_ENABLED - {STOP_LOSS_PRICE_RESET_ENABLED} - DCA트리거 도달 시 즉시 매도하지 않고 DCA트리거 기준가를 재설정합니다.")
-    print(f"MAX_REBUY_PER_STOCK - {MAX_REBUY_PER_STOCK} - 익절 후 재매수와 DCA트리거가 재설정 합산 최대 횟수")
+    print(f"MAX_REBUY_PER_STOCK - {MAX_REBUY_PER_STOCK} - DCA트리거 처리 최대 횟수. 익절 후 재진입은 포함하지 않습니다.")
     print(f"RESET_TAKE_PROFIT_ON_STOP_RESET - {RESET_TAKE_PROFIT_ON_STOP_RESET} - DCA트리거 재설정 시 익절 주문도 새 기준가로 재등록")
     print(f"DEFAULT_TAKE_PROFIT_SCHEDULE - {DEFAULT_TAKE_PROFIT_SCHEDULE} - DCA트리거 회차별 기본 익절률")
     print(f"FORCE_EXIT_ENABLED - {FORCE_EXIT_ENABLED} / FORCE_EXIT_TIME - {FORCE_EXIT_TIME} - 시간이 되면 전체 청산 후 종료합니다.")
