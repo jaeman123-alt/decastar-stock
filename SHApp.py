@@ -1,10 +1,17 @@
 # ===============================
 # file: SHApp_kodex_leverage_oto_state_machine.py
-# version : 2.6.0
+# version : 2.7.0
 # ===============================
 # python SHApp_kodex_leverage_oto.py
 #
 # 기능 요약
+# v2.7.0
+#   - 최초 진입을 오늘 시가 대비 지정한 하락률 이하에서 실행하도록 변경
+#   - 현재가가 이미 진입 기준가 이하이면 시장가로 즉시 진입
+#   - 종목별 최초 진입 지정가 주문을 동시에 접수하고 체결을 감시한 뒤 실제 체결가 기준으로 익절/DCA 감시 시작
+#   - DCA 예산 부족 시 같은 트리거 가격에서 반복 카운트가 증가하지 않도록 현재가 기준으로 다음 트리거를 하향 이동
+#   - DCA 예산 부족 터치 횟수 한도(DCA_NO_BUY_TOUCH_MAX) 추가
+#
 # v2.6.0
 #   - DCA 추가매수 예산을 고정 예비예산만이 아니라 실제 계좌 주문가능금액 기준으로 계산 가능
 #   - DCA_USE_ACCOUNT_CASH=True이면 주문 직전 주문가능금액의 일부를 사용해 하락장에서 추가매수 수량을 확대
@@ -219,8 +226,8 @@ TARGET_STOCKS: list[dict[str, Any]] = [
         "code": "0193T0",
         "name": "KODEX SK하이닉스단일종목레버리지",
         "weight": 0.50,
-        "take_profit_pct": 4.0,
-        "stop_loss_pct": 3.0,
+        "take_profit_pct": 2.0,
+        "stop_loss_pct": 2.0,
         "take_profit_schedule": [4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0],
         "stop_loss_schedule": [3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5],
         "test_down_rate": 0.015,   # TEST_MODE: 1초마다 -1.5%
@@ -230,8 +237,8 @@ TARGET_STOCKS: list[dict[str, Any]] = [
         "code": "0193W0",
         "name": "KODEX 삼성전자단일종목레버리지",
         "weight": 0.50,
-        "take_profit_pct": 4.0,
-        "stop_loss_pct": 3.0,
+        "take_profit_pct": 2.0,
+        "stop_loss_pct": 2.0,
         "take_profit_schedule": [4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0],
         "stop_loss_schedule": [3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5],
         "test_down_rate": 0.010,   # TEST_MODE: 1초마다 -1.0%
@@ -343,6 +350,12 @@ STOP_LOSS_REBUY_ENABLED: bool = STOP_LOSS_PRICE_RESET_ENABLED
 # 값을 크게 잡으면 횟수 제한으로 인한 최종손절은 거의 발생하지 않고, DCA 예산이 소진되면 추가매수 없이 익절/마감청산을 기다립니다.
 MAX_REBUY_PER_STOCK: int = 100
 
+# DCA 예산이 부족해서 추가매수를 못 하는 상태에서 트리거가 다시 터치되는 최대 횟수입니다.
+# 예: 3이면 예산부족 1회 -> 현재가 기준 다음 트리거 하향, 2회 -> 다시 하향, 3회 -> 다시 하향,
+# 그 다음 트리거 도달 시 최종 손절로 넘어갑니다.
+DCA_NO_BUY_TOUCH_MAX: int = 3
+
+
 # DCA트리거 재설정 회차별 익절률입니다.
 # 예: 0회차는 기본 익절률, DCA트리거 재설정이 누적될수록 목표 익절률을 낮춰 반등 탈출 가능성을 높입니다.
 # 종목별 take_profit_schedule이 있으면 그 값을 우선 사용합니다.
@@ -393,6 +406,27 @@ ORDER_API_429_RETRY_SLEEP_SEC: float = 2.0
 # "MARKET" : 시장가 매수. 체결 가능성은 높지만 모의투자/실전에서 증거금을 크게 잡을 수 있습니다.
 # "LIMIT"  : 지정가 매수. 주문가격 기준으로 증거금이 계산되어 주문가능금액을 더 근접하게 사용할 수 있습니다.
 BUY_ORDER_TYPE: str = "LIMIT"
+
+
+# ===============================
+# 최초 진입 조건 설정
+# ===============================
+# True이면 아무 때나 즉시 매수하지 않고, 오늘 시가 대비 INITIAL_ENTRY_OPEN_DISCOUNT_PCT 만큼 하락한 가격에서 최초 진입합니다.
+# 예: 오늘 시가 100원, INITIAL_ENTRY_OPEN_DISCOUNT_PCT=2.0 이면 98원에 최초 50% 진입 지정가 주문을 겁니다.
+INITIAL_ENTRY_BY_OPEN_ENABLED: bool = True
+
+# 오늘 시가 대비 최초 진입 기준 하락률입니다.
+INITIAL_ENTRY_OPEN_DISCOUNT_PCT: float = 2.0
+
+# 프로그램 시작 시 이미 현재가가 최초 진입 기준가 이하이면 지정가 대기 없이 시장가로 즉시 진입합니다.
+INITIAL_ENTRY_MARKET_IF_ALREADY_BELOW: bool = True
+
+# 최초 진입 지정가 주문 체결 감시 주기/출력 주기입니다.
+INITIAL_ENTRY_CHECK_SEC: float = 1.0
+INITIAL_ENTRY_PRINT_SEC: float = 30.0
+
+# 최초 진입 지정가 주문 대기 제한입니다. 0이면 마감 청산 시간까지 계속 기다립니다.
+INITIAL_ENTRY_LIMIT_ORDER_TIMEOUT_SEC: float = 0.0
 
 # 지정가 매수 가격 산정 방식입니다.
 # 0.0이면 현재가 기준 지정가, 0.3이면 현재가보다 0.3% 높은 가격으로 지정가 매수합니다.
@@ -1044,6 +1078,230 @@ def _wait_sellable_qty(
     return last_qty
 
 
+
+def _get_today_open_price(client: KiwoomClient, stk_cd: str) -> int:
+    """오늘 시가를 최대한 유연하게 조회합니다.
+
+    KiwoomClient 구현마다 함수명이 다를 수 있으므로 여러 후보를 시도합니다.
+    조회에 실패하면 현재가를 사용하되, 로그에 fallback을 남깁니다.
+    """
+    code = _norm_code(stk_cd)
+
+    method_candidates = (
+        "get_today_open_price",
+        "get_open_price",
+        "get_day_open_price",
+        "get_stock_open_price",
+    )
+    for method_name in method_candidates:
+        if hasattr(client, method_name):
+            try:
+                value = getattr(client, method_name)(code)
+                open_price = _safe_int(value, 0)
+                if open_price > 0:
+                    return open_price
+            except Exception:
+                pass
+
+    # quote/current price dict 계열 함수가 있다면 시가 후보 키를 확인합니다.
+    quote_methods = ("get_quote", "get_stock_quote", "get_current_price_info", "get_price_info")
+    open_keys = ("open", "open_price", "stck_oprc", "oprc", "시가", "open_pric")
+    for method_name in quote_methods:
+        if hasattr(client, method_name):
+            try:
+                data = getattr(client, method_name)(code)
+                if isinstance(data, dict):
+                    for key in open_keys:
+                        open_price = _safe_int(data.get(key), 0)
+                        if open_price > 0:
+                            return open_price
+            except Exception:
+                pass
+
+    # REST 직접 조회 후보. 환경마다 응답 구조가 다를 수 있으므로 실패해도 무시합니다.
+    if hasattr(client, "_post"):
+        rest_candidates = [
+            ("/api/dostk/stkinfo", "ka10001", {"stk_cd": code}),
+            ("/api/dostk/stkinfo", "kt10001", {"stk_cd": code}),
+        ]
+        for path, api_id, body in rest_candidates:
+            try:
+                data = client._post(path, api_id=api_id, body=body)
+                if isinstance(data, dict):
+                    for key in open_keys:
+                        open_price = _safe_int(data.get(key), 0)
+                        if open_price > 0:
+                            return open_price
+            except Exception:
+                pass
+
+    try:
+        last_price = _safe_int(client.get_last_price(code), 0)
+        print(f"[{_now()}] {code} 오늘 시가 조회 실패. 현재가 {format(last_price, ',')}원을 시가 대용으로 사용합니다.")
+        return last_price
+    except Exception as exc:
+        print(f"[{_now()}] {code} 오늘 시가/현재가 조회 실패: {exc}")
+        return 0
+
+
+def _calc_initial_entry_price(open_price: int) -> int:
+    if open_price <= 0:
+        return 0
+    return floor_to(int(open_price * (1 - INITIAL_ENTRY_OPEN_DISCOUNT_PCT / 100.0)), PRICE_UNIT)
+
+
+def _place_limit_buy_at_exact_price_then_takeprofit(
+    client: KiwoomClient,
+    stk_cd: str,
+    qty: int,
+    limit_price: int,
+    label: str = "최초진입",
+) -> dict[str, Any]:
+    """지정한 가격 그대로 매수 주문을 넣고 체결 후 익절 주문을 등록합니다."""
+    stk_cd = _norm_code(stk_cd)
+    take_profit_pct = _take_profit_pct(stk_cd)
+
+    if qty <= 0:
+        raise RuntimeError(f"{stk_cd} {label} 지정가 매수 수량이 0주입니다.")
+    if limit_price <= 0:
+        raise RuntimeError(f"{stk_cd} {label} 지정가 매수 가격이 0원입니다.")
+
+    if TEST_MODE or b_Test:
+        buy_ord_no = f"TEST_{label}_LIMIT_BUY_NOT_SENT"
+        print(f"[{_now()}] [TEST] {stk_cd} {label} 지정가 매수 생략 / 주문가 {format(limit_price, ',')}원 / 수량 {qty}주")
+        buy_avg_price = limit_price
+        filled_qty = qty
+    else:
+        buy_ord_no, actual_qty, actual_order_price = _place_buy_limit_with_retry(client, stk_cd, qty, limit_price)
+        print(
+            f"[{_now()}] {stk_cd} {label} 지정가 매수 주문 접수 / "
+            f"주문번호 {buy_ord_no} / 주문수량 {actual_qty}주 / 주문가 {format(actual_order_price, ',')}원"
+        )
+
+        start_ts = time.time()
+        deadline = start_ts + float_timeout
+        filled_qty = 0
+        buy_avg_price = 0
+        poll_count = 0
+        while time.time() < deadline:
+            poll_count += 1
+            remain_sec = max(0, int(deadline - time.time()))
+            try:
+                summ = client.get_order_fill_summary(buy_ord_no)
+                ord_qty = _safe_int(summ.get("ord_qty"), actual_qty)
+                filled_qty = _safe_int(summ.get("filled_qty"), 0)
+                avg = _safe_int(summ.get("avg_price"), 0)
+                buy_avg_price = avg if avg > 0 else 0
+                print(
+                    f"[{_now()}] {stk_cd} {label} 체결 대기 {poll_count}회차 / "
+                    f"주문 {ord_qty}주 / 체결 {filled_qty}주 / 평균가 {format(buy_avg_price, ',')}원 / 남은시간 {remain_sec}초"
+                )
+                if ord_qty > 0 and filled_qty >= ord_qty:
+                    if buy_avg_price <= 0:
+                        buy_avg_price = _safe_int(client.get_last_price(stk_cd), limit_price)
+                    break
+            except Exception as exc:
+                print(f"[{_now()}] {stk_cd} {label} 체결 조회 오류: {exc}")
+            time.sleep(float_poll)
+
+        if filled_qty <= 0:
+            raise TimeoutError(f"{stk_cd} {label} 지정가 매수 체결 확인 실패 / 주문번호 {buy_ord_no}")
+        if buy_avg_price <= 0:
+            buy_avg_price = _safe_int(client.get_last_price(stk_cd), limit_price)
+
+    sellable_qty = _wait_sellable_qty(client, stk_cd, filled_qty)
+    if sellable_qty <= 0:
+        raise RuntimeError(f"{stk_cd} {label} 매수 체결 후 매도가능수량이 0주입니다.")
+    if sellable_qty < filled_qty:
+        print(f"[{_now()}] {stk_cd} {label} 매도가능수량 기준으로 수량 조정 {filled_qty}주 -> {sellable_qty}주")
+        filled_qty = sellable_qty
+
+    take_profit_price = _calc_take_profit_price(stk_cd, buy_avg_price)
+    tp_result = _place_take_profit_sell(client, stk_cd, filled_qty, take_profit_price)
+    take_profit_ord_no = _require_valid_order_no(tp_result.get("sell_ord_no"), f"{stk_cd} {label} 익절 지정가 매도 주문")
+    print(
+        f"[{_now()}] {stk_cd} {label} 익절 지정가 매도 등록 / "
+        f"주문번호 {take_profit_ord_no} / 수량 {filled_qty}주 / 가격 {format(take_profit_price, ',')}원(+{take_profit_pct:.1f}%)"
+    )
+    return {
+        "buy_ord_no": buy_ord_no,
+        "buy_avg_price": buy_avg_price,
+        "buy_qty": filled_qty,
+        "take_profit_ord_no": take_profit_ord_no,
+        "take_profit_price": take_profit_price,
+        "is_fake_filled": bool(TEST_MODE or b_Test),
+    }
+
+
+def _place_market_buy_force_then_takeprofit(client: KiwoomClient, stk_cd: str, qty: int, ref_price: int, label: str = "최초진입") -> dict[str, Any]:
+    """BUY_ORDER_TYPE과 관계없이 시장가 매수 후 익절 주문을 등록합니다."""
+    stk_cd = _norm_code(stk_cd)
+    if qty <= 0:
+        raise RuntimeError(f"{stk_cd} {label} 시장가 매수 수량이 0주입니다.")
+
+    if TEST_MODE or b_Test:
+        buy_ord_no = f"TEST_{label}_MARKET_BUY_NOT_SENT"
+        buy_avg_price = ref_price
+        filled_qty = qty
+        print(f"[{_now()}] [TEST] {stk_cd} {label} 시장가 매수 생략 / 가정가 {format(buy_avg_price, ',')}원 / 수량 {filled_qty}주")
+    else:
+        buy_ord_no, actual_qty = _place_buy_market_with_retry(client, stk_cd, qty)
+        print(f"[{_now()}] {stk_cd} {label} 시장가 매수 주문 접수 / 주문번호 {buy_ord_no} / 주문수량 {actual_qty}주")
+
+        start_ts = time.time()
+        deadline = start_ts + float_timeout
+        filled_qty = 0
+        buy_avg_price = 0
+        poll_count = 0
+        while time.time() < deadline:
+            poll_count += 1
+            remain_sec = max(0, int(deadline - time.time()))
+            try:
+                summ = client.get_order_fill_summary(buy_ord_no)
+                ord_qty = _safe_int(summ.get("ord_qty"), actual_qty)
+                filled_qty = _safe_int(summ.get("filled_qty"), 0)
+                avg = _safe_int(summ.get("avg_price"), 0)
+                buy_avg_price = avg if avg > 0 else 0
+                print(
+                    f"[{_now()}] {stk_cd} {label} 시장가 체결 대기 {poll_count}회차 / "
+                    f"주문 {ord_qty}주 / 체결 {filled_qty}주 / 평균가 {format(buy_avg_price, ',')}원 / 남은시간 {remain_sec}초"
+                )
+                if ord_qty > 0 and filled_qty >= ord_qty:
+                    if buy_avg_price <= 0:
+                        buy_avg_price = _safe_int(client.get_last_price(stk_cd), ref_price)
+                    break
+            except Exception as exc:
+                print(f"[{_now()}] {stk_cd} {label} 시장가 체결 조회 오류: {exc}")
+            time.sleep(float_poll)
+
+        if filled_qty <= 0:
+            raise TimeoutError(f"{stk_cd} {label} 시장가 매수 체결 확인 실패 / 주문번호 {buy_ord_no}")
+        if buy_avg_price <= 0:
+            buy_avg_price = _safe_int(client.get_last_price(stk_cd), ref_price)
+
+    sellable_qty = _wait_sellable_qty(client, stk_cd, filled_qty)
+    if sellable_qty <= 0:
+        raise RuntimeError(f"{stk_cd} {label} 매수 체결 후 매도가능수량이 0주입니다.")
+    if sellable_qty < filled_qty:
+        filled_qty = sellable_qty
+
+    take_profit_price = _calc_take_profit_price(stk_cd, buy_avg_price)
+    tp_result = _place_take_profit_sell(client, stk_cd, filled_qty, take_profit_price)
+    take_profit_ord_no = _require_valid_order_no(tp_result.get("sell_ord_no"), f"{stk_cd} {label} 익절 지정가 매도 주문")
+    print(
+        f"[{_now()}] {stk_cd} {label} 익절 지정가 매도 등록 / "
+        f"주문번호 {take_profit_ord_no} / 수량 {filled_qty}주 / 가격 {format(take_profit_price, ',')}원"
+    )
+    return {
+        "buy_ord_no": buy_ord_no,
+        "buy_avg_price": buy_avg_price,
+        "buy_qty": filled_qty,
+        "take_profit_ord_no": take_profit_ord_no,
+        "take_profit_price": take_profit_price,
+        "is_fake_filled": bool(TEST_MODE or b_Test),
+    }
+
+
 def _make_order_plan(client: KiwoomClient, cur_entr: int) -> list[dict[str, Any]]:
     plans: list[dict[str, Any]] = []
 
@@ -1055,9 +1313,16 @@ def _make_order_plan(client: KiwoomClient, cur_entr: int) -> list[dict[str, Any]
 
         now_price = int(client.get_last_price(stk_cd))
         time.sleep(1)
+        open_price = _get_today_open_price(client, stk_cd) if INITIAL_ENTRY_BY_OPEN_ENABLED else now_price
+        initial_entry_price = _calc_initial_entry_price(open_price) if INITIAL_ENTRY_BY_OPEN_ENABLED else 0
 
         buy_order_type = _buy_order_type()
-        planned_buy_price = _calc_limit_buy_price(stk_cd, now_price) if buy_order_type == "LIMIT" else now_price
+        if INITIAL_ENTRY_BY_OPEN_ENABLED and initial_entry_price > 0:
+            planned_buy_price = initial_entry_price
+            entry_mode = "OPEN_DISCOUNT_MARKET" if now_price <= initial_entry_price and INITIAL_ENTRY_MARKET_IF_ALREADY_BELOW else "OPEN_DISCOUNT_LIMIT"
+        else:
+            planned_buy_price = _calc_limit_buy_price(stk_cd, now_price) if buy_order_type == "LIMIT" else now_price
+            entry_mode = buy_order_type
         qty = int(budget // planned_buy_price) if planned_buy_price > 0 else 0
         expected_amount = qty * planned_buy_price
         remaining_budget = budget - expected_amount
@@ -1072,6 +1337,9 @@ def _make_order_plan(client: KiwoomClient, cur_entr: int) -> list[dict[str, Any]
                 "budget": budget,
                 "dca_reserve_budget": math.floor(cur_entr * DCA_RESERVE_CASH_RATE * weight),
                 "now_price": now_price,
+                "open_price": open_price,
+                "initial_entry_price": initial_entry_price,
+                "entry_mode": entry_mode,
                 "planned_buy_price": planned_buy_price,
                 "buy_order_type": buy_order_type,
                 "qty": qty,
@@ -1099,9 +1367,9 @@ def _print_order_plan(plans: list[dict[str, Any]], cur_entr: int) -> None:
             f"{plan['stk_nm']}[{plan['stk_cd']}] "
             f"비중 {plan['weight'] * 100:.0f}% / "
             f"최초진입예산 {format(plan['budget'], ',')}원 / DCA예비예산 {format(plan.get('dca_reserve_budget', 0), ',')}원 / "
-            f"현재가 {format(plan['now_price'], ',')}원 / "
-            f"매수방식 {plan.get('buy_order_type', 'MARKET')} / "
-            f"주문기준가 {format(plan.get('planned_buy_price', plan['now_price']), ',')}원 / "
+            f"시가 {format(plan.get('open_price', 0), ',')}원 / 현재가 {format(plan['now_price'], ',')}원 / "
+            f"진입방식 {plan.get('entry_mode', plan.get('buy_order_type', 'MARKET'))} / "
+            f"진입기준가 {format(plan.get('planned_buy_price', plan['now_price']), ',')}원 / "
             f"예상수량 {plan['qty']}주 / "
             f"예상매수금액 {format(plan['expected_amount'], ',')}원 / "
             f"익절 {plan['take_profit_pct']:.1f}% -> {format(plan['expected_take_profit_price'], ',')}원 / "
@@ -1111,7 +1379,10 @@ def _print_order_plan(plans: list[dict[str, Any]], cur_entr: int) -> None:
     print("-" * 72)
     print(f"총 예상 매수금액: {format(total_expected, ',')}원")
     print(f"예상 최초 진입 후 DCA/잔여 주문가능금액: {format(cur_entr - total_expected, ',')}원")
-    if _buy_order_type() == "LIMIT":
+    if INITIAL_ENTRY_BY_OPEN_ENABLED:
+        print(f"※ 최초 진입 조건 사용: 오늘 시가 대비 -{INITIAL_ENTRY_OPEN_DISCOUNT_PCT:.2f}% 이하에서 진입합니다.")
+        print("※ 이미 기준가 이하이면 시장가로 즉시 진입하고, 아니면 기준가에 지정가 주문 후 체결을 감시합니다.")
+    elif _buy_order_type() == "LIMIT":
         print(f"※ 지정가 매수 방식입니다. 주문기준가는 현재가 +{LIMIT_BUY_UP_PCT:.2f}%를 호가단위로 올림한 가격입니다.")
         print("※ 지정가보다 시장가격이 높으면 미체결될 수 있습니다.")
     else:
@@ -1837,6 +2108,155 @@ def _place_buy_then_takeprofit(client: KiwoomClient, stk_cd: str, buy_price: int
     }
 
 
+
+def _watch_pending_initial_entries(
+    client: KiwoomClient,
+    pending_items: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """최초 진입 지정가 주문들을 동시에 감시합니다.
+
+    반환값: (results, stop_watch_items)
+    """
+    results: list[dict[str, Any]] = []
+    stop_watch_items: list[dict[str, Any]] = []
+    if not pending_items:
+        return results, stop_watch_items
+
+    print("\n" + "=" * 72)
+    print(f"[{_now()}] 최초 진입 지정가 주문 체결 감시 시작")
+    print("=" * 72)
+    for item in pending_items:
+        print(
+            f"{item['stk_nm']}[{item['stk_cd']}] 주문번호 {item['buy_ord_no']} / "
+            f"주문가 {format(item['order_price'], ',')}원 / 주문수량 {item['qty']}주 / "
+            f"시가 {format(item.get('open_price', 0), ',')}원 / 현재가 {format(item.get('now_price', 0), ',')}원"
+        )
+
+    active_pending = {_norm_code(item["stk_cd"]): item for item in pending_items}
+    start_ts = time.time()
+    last_print_ts = 0.0
+
+    while active_pending:
+        if _force_exit_time_reached():
+            print(f"[{_now()}] 최초 진입 대기 중 마감 시간이 도달했습니다. 미체결 주문을 취소하고 대기를 종료합니다.")
+            _cancel_unfilled_orders(client, target_codes=set(active_pending.keys()), only_sell_orders=False, reason="최초 진입 미체결 취소")
+            break
+
+        if INITIAL_ENTRY_LIMIT_ORDER_TIMEOUT_SEC and INITIAL_ENTRY_LIMIT_ORDER_TIMEOUT_SEC > 0:
+            if time.time() - start_ts >= INITIAL_ENTRY_LIMIT_ORDER_TIMEOUT_SEC:
+                print(f"[{_now()}] 최초 진입 지정가 대기 제한 {INITIAL_ENTRY_LIMIT_ORDER_TIMEOUT_SEC:.0f}초 도달. 남은 미체결 주문을 취소합니다.")
+                _cancel_unfilled_orders(client, target_codes=set(active_pending.keys()), only_sell_orders=False, reason="최초 진입 대기시간 초과")
+                break
+
+        should_print = (time.time() - last_print_ts) >= INITIAL_ENTRY_PRINT_SEC
+
+        for stk_cd, item in list(active_pending.items()):
+            buy_ord_no = item["buy_ord_no"]
+            qty = int(item["qty"])
+            order_price = int(item["order_price"])
+            stk_nm = str(item["stk_nm"])
+            filled_qty = 0
+            buy_avg_price = 0
+            try:
+                summ = client.get_order_fill_summary(buy_ord_no)
+                ord_qty = _safe_int(summ.get("ord_qty"), qty)
+                filled_qty = _safe_int(summ.get("filled_qty"), 0)
+                buy_avg_price = _safe_int(summ.get("avg_price"), 0)
+                if should_print:
+                    try:
+                        last_price = _safe_int(client.get_last_price(stk_cd), 0)
+                    except Exception:
+                        last_price = 0
+                    print(
+                        f"[{_now()}] [최초진입대기] {stk_nm}[{stk_cd}] "
+                        f"현재 {format(last_price, ',')}원 / 주문가 {format(order_price, ',')}원 / "
+                        f"주문 {ord_qty}주 / 체결 {filled_qty}주 / 평균가 {format(buy_avg_price, ',')}원"
+                    )
+                if ord_qty > 0 and filled_qty >= ord_qty:
+                    if buy_avg_price <= 0:
+                        buy_avg_price = _safe_int(client.get_last_price(stk_cd), order_price)
+
+                    sellable_qty = _wait_sellable_qty(client, stk_cd, filled_qty)
+                    if sellable_qty <= 0:
+                        print(f"[{_now()}] {stk_nm}[{stk_cd}] 최초 진입 체결 후 매도가능수량이 0주라서 감시 등록을 보류합니다.")
+                        continue
+                    if sellable_qty < filled_qty:
+                        filled_qty = sellable_qty
+
+                    take_profit_price = _calc_take_profit_price(stk_cd, buy_avg_price)
+                    tp_result = _place_take_profit_sell(client, stk_cd, filled_qty, take_profit_price)
+                    take_profit_ord_no = _require_valid_order_no(tp_result.get("sell_ord_no"), f"{stk_cd} 최초 진입 익절 지정가 매도 주문")
+                    stop_loss_price = _calc_stop_loss_price(stk_cd, buy_avg_price)
+                    take_profit_pct = _take_profit_pct(stk_cd)
+                    stop_loss_pct = _stop_loss_pct(stk_cd)
+
+                    result = {
+                        "stk_nm": stk_nm,
+                        "stk_cd": stk_cd,
+                        "qty": filled_qty,
+                        "buy_avg_price": buy_avg_price,
+                        "take_profit_pct": take_profit_pct,
+                        "stop_loss_pct": stop_loss_pct,
+                        "take_profit_price": take_profit_price,
+                        "stop_loss_price": stop_loss_price,
+                        "buy_ord_no": buy_ord_no,
+                        "take_profit_ord_no": take_profit_ord_no,
+                    }
+                    results.append(result)
+                    stop_watch_items.append(
+                        {
+                            "stk_nm": stk_nm,
+                            "stk_cd": stk_cd,
+                            "qty": filled_qty,
+                            "buy_avg_price": buy_avg_price,
+                            "entry_price": buy_avg_price,
+                            "strategy_base_price": buy_avg_price,
+                            "state": STATE_NORMAL,
+                            "rebuy_count": 0,
+                            "dca_step": 0,
+                            "dca_reserve_total": int(item.get("dca_reserve_budget", 0) or 0),
+                            "dca_used_amount": 0,
+                            "no_buy_touch_count": 0,
+                            "take_profit_pct": take_profit_pct,
+                            "take_profit_price": take_profit_price,
+                            "stop_loss_pct": stop_loss_pct,
+                            "stop_loss_price": stop_loss_price,
+                            "buy_ord_no": buy_ord_no,
+                            "take_profit_ord_no": take_profit_ord_no,
+                        }
+                    )
+                    _log_trade_event(
+                        event="BUY",
+                        stk_cd=stk_cd,
+                        stk_nm=stk_nm,
+                        qty=filled_qty,
+                        price=buy_avg_price,
+                        base_price=buy_avg_price,
+                        order_no=buy_ord_no,
+                        memo="오늘 시가 대비 조건부 최초 진입 지정가 체결",
+                        state=STATE_NORMAL,
+                        cycle=0,
+                        take_profit_price=take_profit_price,
+                        stop_loss_price=stop_loss_price,
+                    )
+                    print(
+                        f"[{_now()}] [최초진입체결] {stk_nm}[{stk_cd}] "
+                        f"체결가 {format(buy_avg_price, ',')}원 / 수량 {filled_qty}주 / "
+                        f"익절 {format(take_profit_price, ',')}원 / DCA {format(stop_loss_price, ',')}원 / 익절주문 {take_profit_ord_no}"
+                    )
+                    active_pending.pop(stk_cd, None)
+            except Exception as exc:
+                print(f"[{_now()}] {stk_nm}[{stk_cd}] 최초 진입 체결 감시 오류: {exc}")
+
+        if should_print:
+            last_print_ts = time.time()
+
+        if active_pending:
+            time.sleep(INITIAL_ENTRY_CHECK_SEC)
+
+    return results, stop_watch_items
+
+
 def _rebuy_count(item: dict[str, Any]) -> int:
     return int(item.get("rebuy_count", 0) or 0)
 
@@ -2291,11 +2711,21 @@ def _reset_prices_after_stop_touch(
     # 이 경우도 손절/DCA 트리거 1회로 집계하지만, 최종손절로 넘기지는 않습니다.
     estimated_buy_price = _calc_limit_buy_price(stk_cd, last_price) if (_buy_order_type() == "LIMIT") else last_price
     if dca_budget <= 0 or estimated_buy_price <= 0 or dca_budget < estimated_buy_price:
-        new_stop_pct = _stop_loss_pct_by_cycle(stk_cd, next_count)
-        new_stop_price = _calc_stop_loss_price(stk_cd, old_avg_price, next_count)
+        # 예산 부족 시에는 같은 old_avg_price 기준으로 트리거를 다시 계산하면
+        # 이미 현재가가 트리거 아래에 있는 상태에서 즉시 다음 회차가 반복될 수 있습니다.
+        # 따라서 현재가를 새 기준으로 삼아 다음 트리거를 아래로 이동합니다.
+        no_buy_touch_count = int(item.get("no_buy_touch_count", 0) or 0) + 1
+        if no_buy_touch_count > DCA_NO_BUY_TOUCH_MAX:
+            print(
+                f"[{_now()}] [DCA예산부족한도] {stk_nm}[{stk_cd}] "
+                f"예산부족 터치 {no_buy_touch_count-1}/{DCA_NO_BUY_TOUCH_MAX} 초과. 최종손절로 넘깁니다."
+            )
+            return False
+
+        new_stop_pct = _stop_loss_pct(stk_cd)
+        new_stop_price = floor_to(int(last_price * (1 - new_stop_pct / 100.0)), PRICE_UNIT)
         item["state"] = STATE_RECOVERY
-        item["rebuy_count"] = next_count
-        item["dca_step"] = next_count
+        item["no_buy_touch_count"] = no_buy_touch_count
         item["stop_loss_pct"] = new_stop_pct
         item["stop_loss_price"] = new_stop_price
         item["dca_budget_exhausted"] = True
@@ -2309,7 +2739,7 @@ def _reset_prices_after_stop_touch(
             order_no="",
             memo="DCA트리거선 터치: DCA 예산 부족 또는 1주 미만으로 추가매수 없이 다음 트리거만 조정",
             state=item["state"],
-            cycle=next_count,
+            cycle=no_buy_touch_count,
             take_profit_price=old_tp_price,
             stop_loss_price=new_stop_price,
             dca_budget=dca_budget,
@@ -2320,8 +2750,8 @@ def _reset_prices_after_stop_touch(
         print(
             f"[{_now()}] [DCA예산부족] {stk_nm}[{stk_cd}] "
             f"단계예산 {format(dca_budget, ',')}원 / 예상주문가 {format(estimated_buy_price, ',')}원으로 1주 매수 불가. "
-            f"추가매수 없이 DCA트리거만 {format(new_stop_price, ',')}원(-{new_stop_pct:.2f}%)으로 조정합니다. "
-            f"회차 {next_count}/{MAX_REBUY_PER_STOCK}"
+            f"추가매수 없이 현재가 기준 다음 DCA트리거를 {format(new_stop_price, ',')}원(-{new_stop_pct:.2f}%)으로 조정합니다. "
+            f"예산부족터치 {no_buy_touch_count}/{DCA_NO_BUY_TOUCH_MAX}"
         )
         return True
 
@@ -2432,6 +2862,7 @@ def _reset_prices_after_stop_touch(
     item["state"] = STATE_RECOVERY
     item["rebuy_count"] = next_count
     item["dca_step"] = next_count
+    item["no_buy_touch_count"] = 0
     item["dca_used_amount"] = int(item.get("dca_used_amount", 0) or 0) + int(add_amount or 0)
     item["strategy_base_price"] = new_avg_price
     item["buy_avg_price"] = new_avg_price
@@ -2950,7 +3381,8 @@ def _run_restore_mode(client: KiwoomClient, restore_items: list[dict[str, Any]],
                 "dca_step": 0,
                 "dca_reserve_total": 0,
                 "dca_used_amount": 0,
-            }
+            "no_buy_touch_count": 0,
+        }
         )
 
     if STOP_LOSS_WATCH_ENABLED:
@@ -3100,6 +3532,7 @@ def main() -> None:
     set_test_mode(b_Tprint)
     print(f"TEST_MODE - {TEST_MODE} - [MAIN] KODEX SK하이닉스/삼성전자 단일종목레버리지 50:50 자동매수 APP 시작")
     print(f"BUY_ORDER_TYPE - {_buy_order_type()} - LIMIT이면 지정가 매수, MARKET이면 시장가 매수로 실행합니다.")
+    print(f"INITIAL_ENTRY_BY_OPEN_ENABLED - {INITIAL_ENTRY_BY_OPEN_ENABLED} / INITIAL_ENTRY_OPEN_DISCOUNT_PCT - {INITIAL_ENTRY_OPEN_DISCOUNT_PCT:.2f}% - 오늘 시가 대비 조건부 최초 진입")
     if _buy_order_type() == "LIMIT":
         print(f"LIMIT_BUY_UP_PCT - {LIMIT_BUY_UP_PCT:.2f}% - 현재가보다 이 비율만큼 높은 가격을 호가단위 올림하여 지정가 매수합니다.")
     print(f"TAKE_PROFIT_REBUY_ENABLED - {TAKE_PROFIT_REBUY_ENABLED} - 익절 체결 시 같은 종목을 재매수합니다.")
@@ -3110,7 +3543,8 @@ def main() -> None:
     if DCA_USE_ACCOUNT_CASH:
         print(f"DCA_ACCOUNT_CASH_USE_RATE - {DCA_ACCOUNT_CASH_USE_RATE:.2f} / DCA_MIN_REMAINING_CASH - {format(DCA_MIN_REMAINING_CASH, ',')}원 / DCA_MAX_ORDER_BY_RESERVE_RATE - {DCA_MAX_ORDER_BY_RESERVE_RATE}")
     print(f"STOP_LOSS_PRICE_RESET_ENABLED - {STOP_LOSS_PRICE_RESET_ENABLED} - DCA트리거 도달 시 즉시 매도하지 않고 DCA트리거 기준가를 재설정합니다.")
-    print(f"MAX_REBUY_PER_STOCK - {MAX_REBUY_PER_STOCK} - DCA트리거 처리 최대 횟수. 익절 후 재진입은 포함하지 않습니다.")
+    print(f"MAX_REBUY_PER_STOCK - {MAX_REBUY_PER_STOCK} - DCA 추가매수 성공 처리 최대 횟수. 익절 후 재진입은 포함하지 않습니다.")
+    print(f"DCA_NO_BUY_TOUCH_MAX - {DCA_NO_BUY_TOUCH_MAX} - DCA 예산부족 상태에서 현재가 기준 다음 트리거를 하향 이동할 최대 터치 횟수")
     print(f"RESET_TAKE_PROFIT_ON_STOP_RESET - {RESET_TAKE_PROFIT_ON_STOP_RESET} - DCA트리거 재설정 시 익절 주문도 새 기준가로 재등록")
     print(f"DEFAULT_TAKE_PROFIT_SCHEDULE - {DEFAULT_TAKE_PROFIT_SCHEDULE} - DCA트리거 회차별 기본 익절률")
     print(f"FORCE_EXIT_ENABLED - {FORCE_EXIT_ENABLED} / FORCE_EXIT_TIME - {FORCE_EXIT_TIME} - 시간이 되면 전체 청산 후 종료합니다.")
@@ -3166,59 +3600,121 @@ def main() -> None:
 
     results: list[dict[str, Any]] = []
     stop_watch_items: list[dict[str, Any]] = []
+    pending_initial_entries: list[dict[str, Any]] = []
 
     for plan in order_plans:
         stk_cd = _norm_code(plan["stk_cd"])
         stk_nm = str(plan["stk_nm"])
         budget = int(plan["budget"])
         now_price = int(plan["now_price"])
+        open_price = int(plan.get("open_price", now_price) or now_price)
+        entry_price = int(plan.get("initial_entry_price", 0) or 0)
+        planned_buy_price = int(plan.get("planned_buy_price", now_price) or now_price)
         qty = int(plan["qty"])
 
-        # 이전 종목 매수 이후 주문가능금액이 줄었거나 시장가 체결가가 높아질 수 있으므로
-        # 실제 주문 직전 주문가능금액/현재가로 수량을 보수적으로 재계산합니다.
-        if not TEST_MODE:
+        if INITIAL_ENTRY_BY_OPEN_ENABLED and entry_price > 0:
             try:
-                cur_entr_now = _safe_int(client.get_current_entr(), 0)
-                last_price_now = _safe_int(client.get_last_price(stk_cd), now_price)
-                if _buy_order_type() == "LIMIT":
-                    order_price_now = _calc_limit_buy_price(stk_cd, last_price_now)
-                    safe_budget = min(budget, cur_entr_now)
-                    safe_qty = int(safe_budget // order_price_now) if order_price_now > 0 else qty
-                    budget_label = f"지정가주문가능예산 {format(safe_budget, ',')}원"
-                else:
-                    order_price_now = last_price_now
-                    safe_budget = min(budget, int(cur_entr_now * MARKET_BUY_CASH_SAFETY_RATE))
-                    safe_qty = int(safe_budget // last_price_now) if last_price_now > 0 else qty
-                    budget_label = f"시장가안전예산 {format(safe_budget, ',')}원({MARKET_BUY_CASH_SAFETY_RATE*100:.0f}%)"
+                now_price = _safe_int(client.get_last_price(stk_cd), now_price)
+            except Exception:
+                pass
 
-                if 0 < safe_qty < qty:
-                    print(
-                        f"[{_now()}] {stk_nm}[{stk_cd}] 주문 직전 수량 조정 / "
-                        f"기존 {qty}주 -> {safe_qty}주 / "
-                        f"주문가능금액 {format(cur_entr_now, ',')}원 / "
-                        f"{budget_label} / "
-                        f"현재가 {format(last_price_now, ',')}원 / 주문기준가 {format(order_price_now, ',')}원"
-                    )
-                    qty = safe_qty
-                    now_price = last_price_now
+            # 현재가가 이미 시가 대비 -2% 기준 이하라면 시장가로 바로 진입합니다.
+            if INITIAL_ENTRY_MARKET_IF_ALREADY_BELOW and now_price <= entry_price:
+                buy_price_for_qty = max(1, now_price)
+                qty = int(budget // buy_price_for_qty)
+                print(
+                    f"[{_now()}] {stk_nm}[{stk_cd}] 이미 최초 진입 기준 이하 / "
+                    f"시가 {format(open_price, ',')}원 / 기준 {format(entry_price, ',')}원 / 현재 {format(now_price, ',')}원 "
+                    f"-> 시장가 즉시 진입 / 예산 {format(budget, ',')}원 / 수량 {qty}주"
+                )
+                if qty < 1:
+                    print(f"[{_now()}] {stk_nm}[{stk_cd}] 매수 가능 수량이 0주라서 건너뜁니다.")
+                    continue
+                try:
+                    oto_result = _place_market_buy_force_then_takeprofit(client=client, stk_cd=stk_cd, qty=qty, ref_price=now_price, label="시가대비조건 최초진입")
+                except Exception as exc:
+                    print(f"[{_now()}] {stk_nm}[{stk_cd}] 최초 진입 시장가 주문 실패: {exc}")
+                    continue
+            else:
+                qty = int(budget // entry_price) if entry_price > 0 else 0
+                print(
+                    f"[{_now()}] {stk_nm}[{stk_cd}] 최초 진입 지정가 대기 주문 / "
+                    f"시가 {format(open_price, ',')}원 / 기준 {format(entry_price, ',')}원(-{INITIAL_ENTRY_OPEN_DISCOUNT_PCT:.2f}%) / "
+                    f"현재 {format(now_price, ',')}원 / 예산 {format(budget, ',')}원 / 수량 {qty}주"
+                )
+                if qty < 1:
+                    print(f"[{_now()}] {stk_nm}[{stk_cd}] 최초 진입 지정가 수량이 0주라서 건너뜁니다.")
+                    continue
+                try:
+                    if TEST_MODE or b_Test:
+                        # TEST에서는 바로 체결 가정으로 넘깁니다.
+                        oto_result = _place_limit_buy_at_exact_price_then_takeprofit(client, stk_cd, qty, entry_price, label="시가대비조건 최초진입")
+                    else:
+                        buy_ord_no, actual_qty, actual_order_price = _place_buy_limit_with_retry(client, stk_cd, qty, entry_price)
+                        print(
+                            f"[{_now()}] {stk_nm}[{stk_cd}] 최초 진입 지정가 주문 접수 / "
+                            f"주문번호 {buy_ord_no} / 주문가 {format(actual_order_price, ',')}원 / 주문수량 {actual_qty}주"
+                        )
+                        pending_initial_entries.append(
+                            {
+                                "stk_nm": stk_nm,
+                                "stk_cd": stk_cd,
+                                "budget": budget,
+                                "dca_reserve_budget": int(plan.get("dca_reserve_budget", 0) or 0),
+                                "open_price": open_price,
+                                "now_price": now_price,
+                                "order_price": actual_order_price,
+                                "qty": actual_qty,
+                                "buy_ord_no": buy_ord_no,
+                            }
+                        )
+                        continue
+                except Exception as exc:
+                    print(f"[{_now()}] {stk_nm}[{stk_cd}] 최초 진입 지정가 주문 실패: {exc}")
+                    continue
+        else:
+            # 기존 즉시 진입 방식
+            if not TEST_MODE:
+                try:
+                    cur_entr_now = _safe_int(client.get_current_entr(), 0)
+                    last_price_now = _safe_int(client.get_last_price(stk_cd), now_price)
+                    if _buy_order_type() == "LIMIT":
+                        order_price_now = _calc_limit_buy_price(stk_cd, last_price_now)
+                        safe_budget = min(budget, cur_entr_now)
+                        safe_qty = int(safe_budget // order_price_now) if order_price_now > 0 else qty
+                        budget_label = f"지정가주문가능예산 {format(safe_budget, ',')}원"
+                    else:
+                        order_price_now = last_price_now
+                        safe_budget = min(budget, int(cur_entr_now * MARKET_BUY_CASH_SAFETY_RATE))
+                        safe_qty = int(safe_budget // last_price_now) if last_price_now > 0 else qty
+                        budget_label = f"시장가안전예산 {format(safe_budget, ',')}원({MARKET_BUY_CASH_SAFETY_RATE*100:.0f}%)"
+
+                    if 0 < safe_qty < qty:
+                        print(
+                            f"[{_now()}] {stk_nm}[{stk_cd}] 주문 직전 수량 조정 / "
+                            f"기존 {qty}주 -> {safe_qty}주 / 주문가능금액 {format(cur_entr_now, ',')}원 / "
+                            f"{budget_label} / 현재가 {format(last_price_now, ',')}원 / 주문기준가 {format(order_price_now, ',')}원"
+                        )
+                        qty = safe_qty
+                        now_price = last_price_now
+                except Exception as exc:
+                    print(f"[{_now()}] {stk_nm}[{stk_cd}] 주문 직전 주문가능금액/현재가 재확인 실패: {exc}")
+
+            print(
+                f"[{_now()}] {stk_nm}[{stk_cd}] "
+                f"배정금액 {format(budget, ',')}원 / 현재가 {format(now_price, ',')}원 / "
+                f"매수방식 {_buy_order_type()} / 매수수량 {qty}주"
+            )
+
+            if qty < 1:
+                print(f"[{_now()}] {stk_nm}[{stk_cd}] 매수 가능 수량이 0주라서 건너뜁니다.")
+                continue
+
+            try:
+                oto_result = _place_buy_then_takeprofit(client=client, stk_cd=stk_cd, buy_price=now_price, qty=qty)
             except Exception as exc:
-                print(f"[{_now()}] {stk_nm}[{stk_cd}] 주문 직전 주문가능금액/현재가 재확인 실패: {exc}")
-
-        print(
-            f"[{_now()}] {stk_nm}[{stk_cd}] "
-            f"배정금액 {format(budget, ',')}원 / 현재가 {format(now_price, ',')}원 / "
-            f"매수방식 {_buy_order_type()} / 매수수량 {qty}주"
-        )
-
-        if qty < 1:
-            print(f"[{_now()}] {stk_nm}[{stk_cd}] 매수 가능 수량이 0주라서 건너뜁니다.")
-            continue
-
-        try:
-            oto_result = _place_buy_then_takeprofit(client=client, stk_cd=stk_cd, buy_price=now_price, qty=qty)
-        except Exception as exc:
-            print(f"[{_now()}] {stk_nm}[{stk_cd}] 주문 실패: {exc}")
-            continue
+                print(f"[{_now()}] {stk_nm}[{stk_cd}] 주문 실패: {exc}")
+                continue
 
         buy_ord_no = oto_result.get("buy_ord_no")
         buy_avg_price = int(oto_result.get("buy_avg_price") or now_price)
@@ -3270,6 +3766,7 @@ def main() -> None:
                 "dca_step": 0,
                 "dca_reserve_total": int(plan.get("dca_reserve_budget", 0) or 0),
                 "dca_used_amount": 0,
+                "no_buy_touch_count": 0,
                 "take_profit_pct": take_profit_pct,
                 "take_profit_price": take_profit_price,
                 "stop_loss_pct": stop_loss_pct,
@@ -3282,10 +3779,14 @@ def main() -> None:
         print(
             f"[{_now()}] {stk_nm}[{stk_cd}] 매수/익절 등록 완료 "
             f"체결가 {format(buy_avg_price, ',')}원 / 수량 {filled_qty}주 / "
-            f"익절주문번호 {take_profit_ord_no} / "
-            f"익절가 {format(take_profit_price, ',')}원(+{take_profit_pct:.1f}%) / "
+            f"익절주문번호 {take_profit_ord_no} / 익절가 {format(take_profit_price, ',')}원(+{take_profit_pct:.1f}%) / "
             f"DCA트리거감시가 {format(stop_loss_price, ',')}원(-{stop_loss_pct:.1f}%)"
         )
+
+    if pending_initial_entries:
+        pending_results, pending_watch_items = _watch_pending_initial_entries(client, pending_initial_entries)
+        results.extend(pending_results)
+        stop_watch_items.extend(pending_watch_items)
 
     print(f"\n[{_now()}] 주문 등록 결과")
     if not results:
