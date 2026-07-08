@@ -1,10 +1,66 @@
 # ===============================
 # file: SHApp_kodex_leverage_oto_state_machine.py
-# version : 2.7.0
+# version : 3.4.0
 # ===============================
 # python SHApp_kodex_leverage_oto.py
 #
 # 기능 요약
+# v3.4.0
+#   - Ctrl+C 사용자 중단 이벤트(STOP_EVENT)를 추가합니다.
+#   - 최초 진입 대기/종목별 DCA 감시/스레드 join 대기 중 Ctrl+C가 즉시 반영되도록 수정합니다.
+#   - 최초 진입 지정가 대기 중 사용자 중단 시 남은 미체결 매수 주문을 취소하고 워커를 종료합니다.
+#   - 긴 time.sleep() 대신 STOP_EVENT.wait() 기반 대기 함수를 사용해 종료 반응성을 높입니다.
+#
+# v3.3.0
+#   - 최초 진입 조건을 3가지 중 선택할 수 있도록 변경합니다.
+#     1) PREV_CLOSE_DISCOUNT: 전일 종가 대비 지정 % 하락 기준
+#     2) OPEN_DISCOUNT: 오늘 시가 대비 지정 % 하락 기준
+#     3) CURRENT_LIMIT: 현재가 기준 즉시 지정가 매수
+#   - 현재가 진입은 시장가가 아니라 현재가 지정가 일반매수로 실행합니다.
+#   - 즉시 진입 조건 충족 시에도 기본값은 LIMIT_AT_CURRENT로 두어 시장가 증거금 문제를 줄입니다.
+#   - 사용자가 자주 바꾸는 설정을 USER CONFIG 영역에 모았습니다.
+#
+# v3.2.0
+#   - 종목별 최초 진입/체결대기/DCA 감시를 독립 스레드로 실행합니다.
+#   - 한 종목이 최초진입대기 상태여도, 이미 매수된 다른 종목은 즉시 익절/DCA 감시에 들어갑니다.
+#   - Kiwoom API 과호출 방지를 위해 API_LOCK / ORDER_LOCK / FILL_QUERY_LOCK / SELL_ALL_LOCK을 추가합니다.
+#   - 마감 청산은 여러 스레드에서 동시에 호출되지 않도록 1회만 실행합니다.
+#
+# v3.1.0
+#   - 최초 진입 기준 가격을 오늘 시가(OPEN) 또는 전일 종가(PREV_CLOSE) 중 선택할 수 있도록 변경합니다.
+#   - INITIAL_ENTRY_BASE_PRICE_MODE = "PREV_CLOSE" 를 기본값으로 사용합니다.
+#   - 전일 종가 기준이면 전일 종가 대비 -2% 이하에서 최초 진입을 판단합니다.
+#   - 전일 종가 조회 실패 시 잘못된 현재가 대체를 하지 않고 최초 진입을 스킵합니다.
+#   - 실행 전 예상 내역/로그에 기준가격 모드와 기준가격을 표시합니다.
+#
+# v3.0.0
+#   - 시가 조회 실패 시 현재가를 시가로 대체하지 않습니다.
+#   - 정확한 오늘 시가를 확인하지 못한 종목은 잘못된 기준가 주문을 넣지 않고 최초 진입을 스킵합니다.
+#   - 오늘 시가가 확인되고 현재가가 시가 대비 -2%~-12% 구간이면 의도대로 시장가 즉시 진입합니다.
+#   - 오늘 시가가 확인되고 현재가가 아직 -2%에 도달하지 않았으면 시가 -2% 가격에 지정가 대기합니다.
+#   - 오늘 시가가 확인되고 현재가가 -12%보다 더 급락했으면 시장가 추격매수하지 않고 현재가보다 1% 낮은 지정가 대기합니다.
+#   - 시가 조회 후보 REST/응답 키를 보강하고, 시가 실패 여부를 실행 전 예상 내역과 로그에 명확히 표시합니다.
+#
+# v2.8.0
+#   - ORDER_FILL_QUERY_MIN_INTERVAL_SEC = 1.2
+#   - 체결조회 429 발생 시 대기 후 재시도
+#   - 최초 진입 감시 주기 1초 → 2초
+#   - 두 종목 동시 대기 시 API 호출 간격 조절
+#   - -12% 급락 진입 금지 조건 유지
+
+# v2.8.0
+#   - 최초 진입 조건에 시가 대비 진입 허용 구간을 추가합니다.
+#   - 시가 대비 -2%~-12% 구간이면 시장가 즉시 진입합니다.
+#   - 시가 대비 -12%를 초과한 급락 구간이면 시장가 추격매수하지 않고 현재가보다 지정한 % 낮은 가격에 지정가 대기합니다.
+#   - 급락 구간 지정가 체결 후 실제 체결가 기준으로 익절/DCA 감시를 시작합니다.
+#   - 오늘 시가 대비 하락률과 진입 판단을 실행 전 예상 내역/로그에 표시합니다.
+#
+# v2.9.0
+#   - 최초 진입 지정가 체결 감시 중 kt00009 조회 제한(HTTP 429) 방지 로직 추가
+#   - 체결조회 API 전체 호출 간격을 두고, 429 발생 시 지수 대기 후 재시도
+#   - 최초진입대기 표시 주기를 현재가 조회와 분리해 API 호출량 축소
+#   - -12% 급락 진입 금지 설정 유지
+#
 # v2.7.0
 #   - 최초 진입을 오늘 시가 대비 지정한 하락률 이하에서 실행하도록 변경
 #   - 현재가가 이미 진입 기준가 이하이면 시장가로 즉시 진입
@@ -83,6 +139,7 @@ import time
 import sys
 import argparse
 import csv
+import threading
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -144,6 +201,76 @@ _log_tee_state: dict[str, Any] = {
     "stderr": None,
     "file": None,
 }
+
+# ===============================
+# v3.2.0 종목별 스레드 실행용 Lock
+# ===============================
+API_LOCK = threading.RLock()
+ORDER_LOCK = threading.RLock()
+FILL_QUERY_LOCK = threading.RLock()
+BALANCE_LOCK = threading.RLock()
+TRADE_EVENT_LOCK = threading.RLock()
+SELL_ALL_LOCK = threading.RLock()
+FORCE_EXIT_EVENT = threading.Event()
+STOP_EVENT = threading.Event()
+
+
+def _stop_requested() -> bool:
+    return STOP_EVENT.is_set() or FORCE_EXIT_EVENT.is_set()
+
+
+def _sleep_interruptible(seconds: float) -> bool:
+    """STOP_EVENT가 설정되면 즉시 True를 반환하고, 아니면 지정 시간 뒤 False를 반환합니다."""
+    try:
+        return STOP_EVENT.wait(max(0.0, float(seconds)))
+    except Exception:
+        time.sleep(seconds)
+        return STOP_EVENT.is_set()
+
+
+class ThreadSafeKiwoomClient:
+    """여러 종목 워커 스레드가 같은 KiwoomClient를 공유할 때 API 호출을 직렬화합니다.
+
+    키움 REST API는 짧은 시간에 동시 호출하면 429가 발생할 수 있으므로,
+    기본적으로 모든 client 메서드를 API_LOCK으로 보호합니다.
+    주문/취소 계열 메서드는 ORDER_LOCK도 함께 사용합니다.
+    """
+
+    _ORDER_METHOD_KEYWORDS = (
+        "place_", "cancel", "order", "_post",
+    )
+
+    def __init__(self, inner: KiwoomClient):
+        self._inner = inner
+
+    def __getattr__(self, name: str):
+        attr = getattr(self._inner, name)
+        if not callable(attr):
+            return attr
+
+        def locked_call(*args, **kwargs):
+            is_order_like = any(key in name for key in self._ORDER_METHOD_KEYWORDS)
+            if is_order_like:
+                with ORDER_LOCK:
+                    with API_LOCK:
+                        return attr(*args, **kwargs)
+            with API_LOCK:
+                return attr(*args, **kwargs)
+
+        return locked_call
+
+
+def _force_exit_once(client: KiwoomClient) -> None:
+    """여러 종목 스레드가 동시에 마감 청산을 호출하지 않도록 1회만 실행합니다."""
+    with SELL_ALL_LOCK:
+        if FORCE_EXIT_EVENT.is_set():
+            print(f"[{_now()}] 마감 청산은 이미 다른 스레드에서 실행 중/완료되었습니다.")
+            return
+        FORCE_EXIT_EVENT.set()
+        STOP_EVENT.set()
+        _print_force_exit_header()
+        print(f"[{_now()}] DCA 감시를 중단하고 전체 청산을 실행합니다.")
+        _run_sell_all_mode(client, auto_yes=True)
 
 
 def _setup_log_tee(log_path: str | None):
@@ -226,7 +353,7 @@ TARGET_STOCKS: list[dict[str, Any]] = [
         "code": "0193T0",
         "name": "KODEX SK하이닉스단일종목레버리지",
         "weight": 0.50,
-        "take_profit_pct": 2.0,
+        "take_profit_pct": 4.0,
         "stop_loss_pct": 2.0,
         "take_profit_schedule": [4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0],
         "stop_loss_schedule": [3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5],
@@ -237,7 +364,7 @@ TARGET_STOCKS: list[dict[str, Any]] = [
         "code": "0193W0",
         "name": "KODEX 삼성전자단일종목레버리지",
         "weight": 0.50,
-        "take_profit_pct": 2.0,
+        "take_profit_pct": 4.0,
         "stop_loss_pct": 2.0,
         "take_profit_schedule": [4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0],
         "stop_loss_schedule": [3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5],
@@ -409,21 +536,77 @@ BUY_ORDER_TYPE: str = "LIMIT"
 
 
 # ===============================
-# 최초 진입 조건 설정
+# USER CONFIG: 사용자가 자주 선택/변경하는 설정
 # ===============================
-# True이면 아무 때나 즉시 매수하지 않고, 오늘 시가 대비 INITIAL_ENTRY_OPEN_DISCOUNT_PCT 만큼 하락한 가격에서 최초 진입합니다.
-# 예: 오늘 시가 100원, INITIAL_ENTRY_OPEN_DISCOUNT_PCT=2.0 이면 98원에 최초 50% 진입 지정가 주문을 겁니다.
+# 최초 진입 조건 선택
+#   "PREV_CLOSE_DISCOUNT": 전일 종가 대비 INITIAL_ENTRY_DISCOUNT_PCT% 하락 기준
+#   "OPEN_DISCOUNT"      : 오늘 시가 대비 INITIAL_ENTRY_DISCOUNT_PCT% 하락 기준
+#   "CURRENT_LIMIT"      : 기준가격 조회 없이 현재가로 즉시 지정가 일반매수
+INITIAL_ENTRY_CONDITION_MODE: str = "PREV_CLOSE_DISCOUNT"
+
+# PREV_CLOSE_DISCOUNT / OPEN_DISCOUNT에서 사용할 하락률입니다.
+# 예: 2.0이면 기준가격 100원 기준 98원 이하에서 진입합니다.
+INITIAL_ENTRY_DISCOUNT_PCT: float = 2.0
+
+# 즉시 진입 조건 충족 시 주문 방식입니다.
+#   "LIMIT_AT_CURRENT": 현재가로 지정가 일반매수. 기본값, 시장가 증거금 과다 문제를 줄입니다.
+#   "MARKET"          : 시장가 매수. 원할 때만 사용하세요.
+INITIAL_ENTRY_IMMEDIATE_ORDER_TYPE: str = "LIMIT_AT_CURRENT"
+
+# 기준가격 대비 진입 허용 하락률 구간입니다.
+# 예: -2% 이하부터 진입을 검토하되, -12%보다 더 급락한 상태에서는 추격매수하지 않습니다.
+INITIAL_ENTRY_MARKET_DROP_MIN_PCT: float = -2.0
+INITIAL_ENTRY_MARKET_DROP_MAX_PCT: float = -12.0
+
+# 급락 구간에서는 현재가보다 이 비율만큼 낮은 가격에 지정가 대기합니다.
+INITIAL_ENTRY_DEEP_DROP_LIMIT_BELOW_CURRENT_PCT: float = 1.0
+
+# 최초 진입/매수 자금 비율
+INITIAL_ENTRY_CASH_RATE: float = 0.50
+DCA_RESERVE_CASH_RATE: float = 0.50
+
+# 익절/DCA 핵심값
+DEFAULT_TAKE_PROFIT_PCT: float = 4.0
+DEFAULT_DCA_TRIGGER_PCT: float = 3.0
+MAX_REBUY_PER_STOCK: int = 100
+DCA_NO_BUY_TOUCH_MAX: int = 3
+
+# 마감 청산 시간
+FORCE_EXIT_ENABLED: bool = True
+FORCE_EXIT_TIME: str = "15:15"
+
+# ===============================
+# 최초 진입 조건 내부 호환 설정
+# ===============================
 INITIAL_ENTRY_BY_OPEN_ENABLED: bool = True
 
-# 오늘 시가 대비 최초 진입 기준 하락률입니다.
-INITIAL_ENTRY_OPEN_DISCOUNT_PCT: float = 2.0
+# 구버전 호환용. 새 버전에서는 INITIAL_ENTRY_CONDITION_MODE를 우선 사용합니다.
+INITIAL_ENTRY_BASE_PRICE_MODE: str = "PREV_CLOSE"
+INITIAL_ENTRY_OPEN_DISCOUNT_PCT: float = INITIAL_ENTRY_DISCOUNT_PCT
 
-# 프로그램 시작 시 이미 현재가가 최초 진입 기준가 이하이면 지정가 대기 없이 시장가로 즉시 진입합니다.
+# 조건 충족 시 바로 주문을 낼지 여부입니다. 단, 기본 주문은 시장가가 아니라 현재가 지정가입니다.
 INITIAL_ENTRY_MARKET_IF_ALREADY_BELOW: bool = True
 
+# True이면 기준가격 조회 실패 시 현재가를 기준가격처럼 사용합니다. 기본값 False 권장.
+ALLOW_OPEN_PRICE_FALLBACK_TO_LAST_PRICE: bool = False
+
+# 기준가격 조회 실패 종목을 신규 최초 진입에서 제외할지 여부입니다.
+SKIP_INITIAL_ENTRY_WHEN_OPEN_PRICE_MISSING: bool = True
+
+# 급락 구간에서도 바로 진입할지 여부입니다. 기본은 False 권장입니다.
+# True로 바꾸면 INITIAL_ENTRY_IMMEDIATE_ORDER_TYPE에 따라 시장가 또는 현재가 지정가로 진입합니다.
+INITIAL_ENTRY_MARKET_ON_DEEP_DROP: bool = False
+
 # 최초 진입 지정가 주문 체결 감시 주기/출력 주기입니다.
-INITIAL_ENTRY_CHECK_SEC: float = 1.0
+INITIAL_ENTRY_CHECK_SEC: float = 2.0
 INITIAL_ENTRY_PRINT_SEC: float = 30.0
+
+# 최초 진입 대기 중 주문 체결조회(kt00009) API 과호출 방지 설정입니다.
+# 로그상 kt00009 유량=1 제한이 확인되어, 여러 종목을 동시에 감시해도 전체 호출 간격을 둡니다.
+ORDER_FILL_QUERY_MIN_INTERVAL_SEC: float = 1.2
+ORDER_FILL_QUERY_429_RETRY_COUNT: int = 3
+ORDER_FILL_QUERY_429_SLEEP_SEC: float = 2.0
+
 
 # 최초 진입 지정가 주문 대기 제한입니다. 0이면 마감 청산 시간까지 계속 기다립니다.
 INITIAL_ENTRY_LIMIT_ORDER_TIMEOUT_SEC: float = 0.0
@@ -470,6 +653,7 @@ TEST_FILL_AFTER_SEC: float = 10.0
 _LAST_BALANCE_MAP: dict[str, dict[str, Any]] = {}
 _LAST_BALANCE_TS: float = 0.0
 _LAST_ORDER_API_TS: float = 0.0
+_LAST_FILL_QUERY_TS: float = 0.0
 
 
 # ===============================
@@ -499,48 +683,50 @@ def _log_trade_event(
     """매매/전략 이벤트를 메모리와 CSV에 기록합니다.
 
     실제 체결 손익은 증권사 체결/잔고 기준과 다를 수 있으므로, 여기의 profit은 프로그램 기준가 기반 추정값입니다.
+    v3.2.0: 종목별 스레드에서 동시에 호출될 수 있어 TRADE_EVENT_LOCK으로 보호합니다.
     """
-    code = _norm_code(stk_cd)
-    if not stk_nm:
-        stk_nm = _target_name(code)
-    row = {
-        "time": _now(),
-        "event": event,
-        "stk_cd": code,
-        "stk_nm": stk_nm,
-        "qty": int(qty or 0),
-        "price": int(price or 0),
-        "base_price": int(base_price or 0),
-        "order_no": str(order_no or ""),
-        "profit_amount": "" if profit_amount is None else int(profit_amount),
-        "profit_pct": "" if profit_pct is None else round(float(profit_pct), 4),
-        "memo": memo,
-    }
-    for key, value in extra.items():
-        row[key] = value
-    TRADE_EVENTS.append(row)
+    with TRADE_EVENT_LOCK:
+        code = _norm_code(stk_cd)
+        if not stk_nm:
+            stk_nm = _target_name(code)
+        row = {
+            "time": _now(),
+            "event": event,
+            "stk_cd": code,
+            "stk_nm": stk_nm,
+            "qty": int(qty or 0),
+            "price": int(price or 0),
+            "base_price": int(base_price or 0),
+            "order_no": str(order_no or ""),
+            "profit_amount": "" if profit_amount is None else int(profit_amount),
+            "profit_pct": "" if profit_pct is None else round(float(profit_pct), 4),
+            "memo": memo,
+        }
+        for key, value in extra.items():
+            row[key] = value
+        TRADE_EVENTS.append(row)
 
-    if not TRADE_CSV_ENABLED:
-        return
+        if not TRADE_CSV_ENABLED:
+            return
 
-    path = _trade_csv_path()
-    fieldnames = [
-        "time", "event", "stk_cd", "stk_nm", "qty", "price", "base_price", "order_no",
-        "profit_amount", "profit_pct", "memo", "state", "cycle", "take_profit_price", "stop_loss_price",
-    ]
-    for key in row.keys():
-        if key not in fieldnames:
-            fieldnames.append(key)
+        path = _trade_csv_path()
+        fieldnames = [
+            "time", "event", "stk_cd", "stk_nm", "qty", "price", "base_price", "order_no",
+            "profit_amount", "profit_pct", "memo", "state", "cycle", "take_profit_price", "stop_loss_price",
+        ]
+        for key in row.keys():
+            if key not in fieldnames:
+                fieldnames.append(key)
 
-    file_exists = os.path.exists(path) and os.path.getsize(path) > 0
-    try:
-        with open(path, "a", newline="", encoding="utf-8-sig") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-            if not file_exists:
-                writer.writeheader()
-            writer.writerow(row)
-    except Exception as exc:
-        print(f"[{_now()}] 거래 CSV 기록 실패: {exc}")
+        file_exists = os.path.exists(path) and os.path.getsize(path) > 0
+        try:
+            with open(path, "a", newline="", encoding="utf-8-sig") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+                if not file_exists:
+                    writer.writeheader()
+                writer.writerow(row)
+        except Exception as exc:
+            print(f"[{_now()}] 거래 CSV 기록 실패: {exc}")
 
 
 def _print_trade_report() -> None:
@@ -770,19 +956,62 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     )
 
 
+
+
+def _wait_fill_query_slot(label: str = "체결조회") -> None:
+    """주문 체결조회 API(kt00009) 과호출을 막기 위해 전체 호출 간격을 보장합니다."""
+    global _LAST_FILL_QUERY_TS
+    if TEST_MODE:
+        return
+
+    with FILL_QUERY_LOCK:
+        now_ts = time.time()
+        wait_sec = ORDER_FILL_QUERY_MIN_INTERVAL_SEC - (now_ts - _LAST_FILL_QUERY_TS)
+        if wait_sec > 0:
+            time.sleep(wait_sec)
+        _LAST_FILL_QUERY_TS = time.time()
+
+
+def _get_order_fill_summary_safe(client: KiwoomClient, ord_no: Any, label: str = "체결조회") -> dict[str, Any]:
+    """체결조회 API를 안전하게 호출합니다.
+
+    kt00009는 유량 제한이 낮아 두 종목을 매초 조회하면 HTTP 429가 쉽게 발생합니다.
+    429가 발생하면 잠시 대기 후 재시도하고, 최종 실패 시 예외를 올립니다.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(1, ORDER_FILL_QUERY_429_RETRY_COUNT + 1):
+        try:
+            _wait_fill_query_slot(label)
+            return client.get_order_fill_summary(ord_no)
+        except Exception as exc:
+            last_exc = exc
+            if not _is_rate_limit_error(exc):
+                raise
+            if attempt >= ORDER_FILL_QUERY_429_RETRY_COUNT:
+                break
+            sleep_sec = ORDER_FILL_QUERY_429_SLEEP_SEC * attempt
+            print(
+                f"[{_now()}] {label} 요청 제한(429) / 주문번호 {ord_no} / "
+                f"{attempt}회차 실패 / {sleep_sec:.1f}초 후 재시도"
+            )
+            time.sleep(sleep_sec)
+    raise RuntimeError(f"{label} 요청 제한 재시도 실패 / 주문번호 {ord_no}: {last_exc}")
+
+
 def _wait_order_api_slot(label: str = "주문 API") -> None:
     """주문/취소 API를 너무 촘촘하게 호출하지 않도록 최소 간격을 보장합니다."""
     global _LAST_ORDER_API_TS
     if TEST_MODE:
         return
 
-    now_ts = time.time()
-    wait_sec = ORDER_API_MIN_INTERVAL_SEC - (now_ts - _LAST_ORDER_API_TS)
-    if wait_sec > 0:
-        print(f"[{_now()}] {label} 연속 호출 방지 대기 {wait_sec:.1f}초")
-        time.sleep(wait_sec)
+    with ORDER_LOCK:
+        now_ts = time.time()
+        wait_sec = ORDER_API_MIN_INTERVAL_SEC - (now_ts - _LAST_ORDER_API_TS)
+        if wait_sec > 0:
+            print(f"[{_now()}] {label} 연속 호출 방지 대기 {wait_sec:.1f}초")
+            time.sleep(wait_sec)
 
-    _LAST_ORDER_API_TS = time.time()
+        _LAST_ORDER_API_TS = time.time()
 
 
 def _call_order_api_with_retry(label: str, func, *args, **kwargs):
@@ -1079,11 +1308,37 @@ def _wait_sellable_qty(
 
 
 
-def _get_today_open_price(client: KiwoomClient, stk_cd: str) -> int:
-    """오늘 시가를 최대한 유연하게 조회합니다.
+def _extract_open_price_from_any(data: Any) -> int:
+    """여러 Kiwoom 응답 형태에서 오늘 시가 필드를 재귀적으로 찾습니다."""
+    open_keys = (
+        "open", "open_price", "open_prc", "open_pric", "oprc", "stck_oprc",
+        "stk_oprc", "cur_oprc", "open_uv", "시가", "금일시가",
+    )
+    if isinstance(data, dict):
+        for key in open_keys:
+            value = data.get(key)
+            open_price = _safe_int(value, 0)
+            if open_price > 0:
+                return open_price
+        for value in data.values():
+            found = _extract_open_price_from_any(value)
+            if found > 0:
+                return found
+    elif isinstance(data, list):
+        for item in data:
+            found = _extract_open_price_from_any(item)
+            if found > 0:
+                return found
+    return 0
 
-    KiwoomClient 구현마다 함수명이 다를 수 있으므로 여러 후보를 시도합니다.
-    조회에 실패하면 현재가를 사용하되, 로그에 fallback을 남깁니다.
+
+def _get_today_open_price(client: KiwoomClient, stk_cd: str) -> int:
+    """오늘 시가를 조회합니다.
+
+    v3.0.0 변경:
+    - 기본적으로 시가 조회 실패 시 현재가를 시가로 대체하지 않습니다.
+    - 현재가 fallback을 허용하면 현재가의 -2%에 잘못된 지정가 주문이 들어갈 수 있으므로
+      ALLOW_OPEN_PRICE_FALLBACK_TO_LAST_PRICE=False 를 기본으로 둡니다.
     """
     code = _norm_code(stk_cd)
 
@@ -1098,56 +1353,284 @@ def _get_today_open_price(client: KiwoomClient, stk_cd: str) -> int:
             try:
                 value = getattr(client, method_name)(code)
                 open_price = _safe_int(value, 0)
+                if open_price <= 0:
+                    open_price = _extract_open_price_from_any(value)
                 if open_price > 0:
                     return open_price
-            except Exception:
-                pass
+            except Exception as exc:
+                if b_Tprint:
+                    print(f"[{_now()}] {code} {method_name} 시가 조회 실패: {exc}")
 
     # quote/current price dict 계열 함수가 있다면 시가 후보 키를 확인합니다.
     quote_methods = ("get_quote", "get_stock_quote", "get_current_price_info", "get_price_info")
-    open_keys = ("open", "open_price", "stck_oprc", "oprc", "시가", "open_pric")
     for method_name in quote_methods:
         if hasattr(client, method_name):
             try:
                 data = getattr(client, method_name)(code)
-                if isinstance(data, dict):
-                    for key in open_keys:
-                        open_price = _safe_int(data.get(key), 0)
-                        if open_price > 0:
-                            return open_price
-            except Exception:
-                pass
+                open_price = _extract_open_price_from_any(data)
+                if open_price > 0:
+                    return open_price
+            except Exception as exc:
+                if b_Tprint:
+                    print(f"[{_now()}] {code} {method_name} quote 시가 조회 실패: {exc}")
 
-    # REST 직접 조회 후보. 환경마다 응답 구조가 다를 수 있으므로 실패해도 무시합니다.
+    # REST 직접 조회 후보. 환경마다 응답 구조가 달라 여러 API ID와 body를 보수적으로 시도합니다.
     if hasattr(client, "_post"):
+        today = datetime.now().strftime("%Y%m%d")
         rest_candidates = [
             ("/api/dostk/stkinfo", "ka10001", {"stk_cd": code}),
             ("/api/dostk/stkinfo", "kt10001", {"stk_cd": code}),
+            # 일봉 차트/일봉 데이터 계열. 실제 응답 키가 달라도 _extract_open_price_from_any()가 재귀 탐색합니다.
+            ("/api/dostk/chart", "ka10081", {"stk_cd": code, "base_dt": today, "upd_stkpc_tp": "1"}),
+            ("/api/dostk/chart", "ka10081", {"stk_cd": code, "base_dt": today, "upd_stkpc_tp": "0"}),
+            ("/api/dostk/chart", "kt10081", {"stk_cd": code, "base_dt": today, "upd_stkpc_tp": "1"}),
         ]
         for path, api_id, body in rest_candidates:
             try:
                 data = client._post(path, api_id=api_id, body=body)
+                open_price = _extract_open_price_from_any(data)
+                if open_price > 0:
+                    return open_price
+            except Exception as exc:
+                if b_Tprint:
+                    print(f"[{_now()}] {code} REST {api_id} 시가 조회 실패: {exc}")
+
+    if ALLOW_OPEN_PRICE_FALLBACK_TO_LAST_PRICE:
+        try:
+            last_price = _safe_int(client.get_last_price(code), 0)
+            print(
+                f"[{_now()}] {code} 오늘 시가 조회 실패. "
+                f"ALLOW_OPEN_PRICE_FALLBACK_TO_LAST_PRICE=True 이므로 현재가 {format(last_price, ',')}원을 시가 대용으로 사용합니다."
+            )
+            return last_price
+        except Exception as exc:
+            print(f"[{_now()}] {code} 오늘 시가/현재가 조회 실패: {exc}")
+            return 0
+
+    print(
+        f"[{_now()}] {code} 오늘 시가 조회 실패. 현재가 대체를 사용하지 않습니다. "
+        "해당 종목은 최초 진입 대상에서 제외됩니다."
+    )
+    return 0
+
+
+def _extract_prev_close_price_from_any(data: Any) -> int:
+    """여러 Kiwoom 응답 형태에서 전일 종가/기준가 필드를 재귀적으로 찾습니다."""
+    prev_close_keys = (
+        "prev_close", "prev_close_price", "prev_clpr", "prdy_clpr", "stck_prdy_clpr",
+        "base_price", "base_pric", "std_prc", "yesterday_close", "y_close",
+        "전일종가", "전일가", "기준가", "전일기준가",
+    )
+    if isinstance(data, dict):
+        for key in prev_close_keys:
+            value = data.get(key)
+            price = _safe_int(value, 0)
+            if price > 0:
+                return price
+        for value in data.values():
+            found = _extract_prev_close_price_from_any(value)
+            if found > 0:
+                return found
+    elif isinstance(data, list):
+        for item in data:
+            found = _extract_prev_close_price_from_any(item)
+            if found > 0:
+                return found
+    return 0
+
+
+def _get_prev_close_price(client: KiwoomClient, stk_cd: str) -> int:
+    """전일 종가를 조회합니다.
+
+    v3.1.0 기본 진입 기준은 PREV_CLOSE입니다.
+    조회 실패 시 기본적으로 현재가 fallback을 사용하지 않습니다.
+    """
+    code = _norm_code(stk_cd)
+
+    method_candidates = (
+        "get_prev_close_price",
+        "get_previous_close_price",
+        "get_yesterday_close_price",
+        "get_base_price",
+    )
+    for method_name in method_candidates:
+        if hasattr(client, method_name):
+            try:
+                value = getattr(client, method_name)(code)
+                price = _safe_int(value, 0)
+                if price <= 0:
+                    price = _extract_prev_close_price_from_any(value)
+                if price > 0:
+                    return price
+            except Exception as exc:
+                if b_Tprint:
+                    print(f"[{_now()}] {code} {method_name} 전일종가 조회 실패: {exc}")
+
+    quote_methods = ("get_quote", "get_stock_quote", "get_current_price_info", "get_price_info")
+    for method_name in quote_methods:
+        if hasattr(client, method_name):
+            try:
+                data = getattr(client, method_name)(code)
+                price = _extract_prev_close_price_from_any(data)
+                if price > 0:
+                    return price
+            except Exception as exc:
+                if b_Tprint:
+                    print(f"[{_now()}] {code} {method_name} quote 전일종가 조회 실패: {exc}")
+
+    if hasattr(client, "_post"):
+        today = datetime.now().strftime("%Y%m%d")
+        rest_candidates = [
+            ("/api/dostk/stkinfo", "ka10001", {"stk_cd": code}),
+            ("/api/dostk/stkinfo", "kt10001", {"stk_cd": code}),
+            ("/api/dostk/chart", "ka10081", {"stk_cd": code, "base_dt": today, "upd_stkpc_tp": "1"}),
+            ("/api/dostk/chart", "ka10081", {"stk_cd": code, "base_dt": today, "upd_stkpc_tp": "0"}),
+            ("/api/dostk/chart", "kt10081", {"stk_cd": code, "base_dt": today, "upd_stkpc_tp": "1"}),
+        ]
+        for path, api_id, body in rest_candidates:
+            try:
+                data = client._post(path, api_id=api_id, body=body)
+                price = _extract_prev_close_price_from_any(data)
+                if price > 0:
+                    return price
+
+                # 일봉 응답에서 오늘/전일 캔들이 리스트로 내려오는 경우를 보정합니다.
+                rows = data if isinstance(data, list) else []
                 if isinstance(data, dict):
-                    for key in open_keys:
-                        open_price = _safe_int(data.get(key), 0)
-                        if open_price > 0:
-                            return open_price
-            except Exception:
-                pass
+                    for value in data.values():
+                        if isinstance(value, list):
+                            rows = value
+                            break
+                day_rows = []
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    date_val = str(_first_present(row, ("dt", "date", "trd_dt", "base_dt", "일자"), ""))
+                    close_val = _safe_int(_first_present(row, ("close", "close_price", "clpr", "stck_clpr", "cur_prc", "현재가", "종가"), 0), 0)
+                    if close_val > 0:
+                        day_rows.append((date_val, close_val))
+                if day_rows:
+                    day_rows.sort(key=lambda x: x[0], reverse=True)
+                    for date_val, close_val in day_rows:
+                        if date_val and date_val != today:
+                            return close_val
+                    if len(day_rows) >= 2:
+                        return day_rows[1][1]
+            except Exception as exc:
+                if b_Tprint:
+                    print(f"[{_now()}] {code} REST {api_id} 전일종가 조회 실패: {exc}")
 
-    try:
-        last_price = _safe_int(client.get_last_price(code), 0)
-        print(f"[{_now()}] {code} 오늘 시가 조회 실패. 현재가 {format(last_price, ',')}원을 시가 대용으로 사용합니다.")
-        return last_price
-    except Exception as exc:
-        print(f"[{_now()}] {code} 오늘 시가/현재가 조회 실패: {exc}")
-        return 0
+    if ALLOW_OPEN_PRICE_FALLBACK_TO_LAST_PRICE:
+        try:
+            last_price = _safe_int(client.get_last_price(code), 0)
+            print(
+                f"[{_now()}] {code} 전일종가 조회 실패. "
+                f"ALLOW_OPEN_PRICE_FALLBACK_TO_LAST_PRICE=True 이므로 현재가 {format(last_price, ',')}원을 기준가격 대용으로 사용합니다."
+            )
+            return last_price
+        except Exception as exc:
+            print(f"[{_now()}] {code} 전일종가/현재가 조회 실패: {exc}")
+            return 0
 
+    print(
+        f"[{_now()}] {code} 전일종가 조회 실패. 현재가 대체를 사용하지 않습니다. "
+        "해당 종목은 최초 진입 대상에서 제외됩니다."
+    )
+    return 0
+
+
+def _initial_entry_condition_mode() -> str:
+    mode = str(INITIAL_ENTRY_CONDITION_MODE or "PREV_CLOSE_DISCOUNT").strip().upper()
+    allowed = {"PREV_CLOSE_DISCOUNT", "OPEN_DISCOUNT", "CURRENT_LIMIT"}
+    if mode not in allowed:
+        print(f"[{_now()}] INITIAL_ENTRY_CONDITION_MODE={INITIAL_ENTRY_CONDITION_MODE!r} 값이 올바르지 않아 PREV_CLOSE_DISCOUNT로 처리합니다.")
+        return "PREV_CLOSE_DISCOUNT"
+    return mode
+
+
+def _initial_entry_base_price_label() -> str:
+    mode = _initial_entry_condition_mode()
+    if mode == "OPEN_DISCOUNT":
+        return "오늘 시가"
+    if mode == "PREV_CLOSE_DISCOUNT":
+        return "전일 종가"
+    if mode == "CURRENT_LIMIT":
+        return "현재가"
+    return f"기준가격({mode})"
+
+
+def _get_initial_entry_base_price(client: KiwoomClient, stk_cd: str) -> int:
+    mode = _initial_entry_condition_mode()
+    if mode == "CURRENT_LIMIT":
+        return _safe_int(client.get_last_price(_norm_code(stk_cd)), 0)
+    if mode == "OPEN_DISCOUNT":
+        return _get_today_open_price(client, stk_cd)
+    if mode == "PREV_CLOSE_DISCOUNT":
+        return _get_prev_close_price(client, stk_cd)
+    return _get_prev_close_price(client, stk_cd)
 
 def _calc_initial_entry_price(open_price: int) -> int:
     if open_price <= 0:
         return 0
-    return floor_to(int(open_price * (1 - INITIAL_ENTRY_OPEN_DISCOUNT_PCT / 100.0)), PRICE_UNIT)
+    return floor_to(int(open_price * (1 - INITIAL_ENTRY_DISCOUNT_PCT / 100.0)), PRICE_UNIT)
+
+
+def _calc_open_drop_pct(open_price: int, now_price: int) -> float:
+    if open_price <= 0 or now_price <= 0:
+        return 0.0
+    return (float(now_price) - float(open_price)) / float(open_price) * 100.0
+
+
+def _calc_deep_drop_limit_price(now_price: int) -> int:
+    if now_price <= 0:
+        return 0
+    return floor_to(int(now_price * (1 - INITIAL_ENTRY_DEEP_DROP_LIMIT_BELOW_CURRENT_PCT / 100.0)), PRICE_UNIT)
+
+
+def _initial_entry_mode_by_open(open_price: int, now_price: int, initial_entry_price: int) -> tuple[str, int, float]:
+    """선택된 최초 진입 조건에 따라 진입 모드를 결정합니다.
+
+    반환값: (entry_mode, planned_buy_price, base_drop_pct)
+    - CURRENT_LIMIT: 현재가 지정가 일반매수
+    - BASE_WAIT_LIMIT: 아직 기준가격 -N%에 도달하지 않아 기준가 지정가 대기
+    - BASE_DISCOUNT_LIMIT_CURRENT: 기준가격 -N%~-12% 구간이라 현재가 지정가 즉시 진입
+    - BASE_DISCOUNT_MARKET: 설정상 시장가 즉시 진입
+    - BASE_DEEP_DROP_LIMIT: -12% 초과 급락이라 현재가보다 낮은 지정가 대기
+    - BASE_DEEP_DROP_MARKET: 급락이어도 설정상 즉시 진입
+    """
+    mode = _initial_entry_condition_mode()
+    if mode == "CURRENT_LIMIT":
+        return "CURRENT_LIMIT", int(now_price or 0), 0.0
+
+    drop_pct = _calc_open_drop_pct(open_price, now_price)
+    if open_price <= 0 or now_price <= 0 or initial_entry_price <= 0:
+        return _buy_order_type(), now_price, drop_pct
+
+    if now_price > initial_entry_price:
+        return "BASE_WAIT_LIMIT", initial_entry_price, drop_pct
+
+    # 이미 기준가격 -N% 이하입니다. 단, 너무 많이 빠진 경우는 바로 추격매수하지 않습니다.
+    if drop_pct < INITIAL_ENTRY_MARKET_DROP_MAX_PCT:
+        if INITIAL_ENTRY_MARKET_ON_DEEP_DROP:
+            if str(INITIAL_ENTRY_IMMEDIATE_ORDER_TYPE).strip().upper() == "MARKET":
+                return "BASE_DEEP_DROP_MARKET", now_price, drop_pct
+            return "BASE_DEEP_DROP_LIMIT_CURRENT", now_price, drop_pct
+        return "BASE_DEEP_DROP_LIMIT", _calc_deep_drop_limit_price(now_price), drop_pct
+
+    if str(INITIAL_ENTRY_IMMEDIATE_ORDER_TYPE).strip().upper() == "MARKET":
+        return "BASE_DISCOUNT_MARKET", now_price, drop_pct
+    return "BASE_DISCOUNT_LIMIT_CURRENT", now_price, drop_pct
+
+def _entry_mode_is_market(entry_mode: str) -> bool:
+    return entry_mode in ("OPEN_DISCOUNT_MARKET", "OPEN_DEEP_DROP_MARKET", "BASE_DISCOUNT_MARKET", "BASE_DEEP_DROP_MARKET")
+
+
+def _entry_mode_is_limit(entry_mode: str) -> bool:
+    return entry_mode in (
+        "OPEN_WAIT_LIMIT", "OPEN_DEEP_DROP_LIMIT", "OPEN_DISCOUNT_LIMIT",
+        "BASE_WAIT_LIMIT", "BASE_DEEP_DROP_LIMIT", "BASE_DEEP_DROP_LIMIT_CURRENT",
+        "BASE_DISCOUNT_LIMIT_CURRENT", "CURRENT_LIMIT",
+    )
 
 
 def _place_limit_buy_at_exact_price_then_takeprofit(
@@ -1187,7 +1670,7 @@ def _place_limit_buy_at_exact_price_then_takeprofit(
             poll_count += 1
             remain_sec = max(0, int(deadline - time.time()))
             try:
-                summ = client.get_order_fill_summary(buy_ord_no)
+                summ = _get_order_fill_summary_safe(client, buy_ord_no, label=f"{stk_cd} 체결조회")
                 ord_qty = _safe_int(summ.get("ord_qty"), actual_qty)
                 filled_qty = _safe_int(summ.get("filled_qty"), 0)
                 avg = _safe_int(summ.get("avg_price"), 0)
@@ -1257,7 +1740,7 @@ def _place_market_buy_force_then_takeprofit(client: KiwoomClient, stk_cd: str, q
             poll_count += 1
             remain_sec = max(0, int(deadline - time.time()))
             try:
-                summ = client.get_order_fill_summary(buy_ord_no)
+                summ = _get_order_fill_summary_safe(client, buy_ord_no, label=f"{stk_cd} 체결조회")
                 ord_qty = _safe_int(summ.get("ord_qty"), actual_qty)
                 filled_qty = _safe_int(summ.get("filled_qty"), 0)
                 avg = _safe_int(summ.get("avg_price"), 0)
@@ -1313,13 +1796,16 @@ def _make_order_plan(client: KiwoomClient, cur_entr: int) -> list[dict[str, Any]
 
         now_price = int(client.get_last_price(stk_cd))
         time.sleep(1)
-        open_price = _get_today_open_price(client, stk_cd) if INITIAL_ENTRY_BY_OPEN_ENABLED else now_price
-        initial_entry_price = _calc_initial_entry_price(open_price) if INITIAL_ENTRY_BY_OPEN_ENABLED else 0
+        base_price = _get_initial_entry_base_price(client, stk_cd) if INITIAL_ENTRY_BY_OPEN_ENABLED else now_price
+        initial_entry_price = _calc_initial_entry_price(base_price) if INITIAL_ENTRY_BY_OPEN_ENABLED else 0
 
         buy_order_type = _buy_order_type()
-        if INITIAL_ENTRY_BY_OPEN_ENABLED and initial_entry_price > 0:
-            planned_buy_price = initial_entry_price
-            entry_mode = "OPEN_DISCOUNT_MARKET" if now_price <= initial_entry_price and INITIAL_ENTRY_MARKET_IF_ALREADY_BELOW else "OPEN_DISCOUNT_LIMIT"
+        open_drop_pct = _calc_open_drop_pct(base_price, now_price)
+        if INITIAL_ENTRY_BY_OPEN_ENABLED and base_price <= 0 and SKIP_INITIAL_ENTRY_WHEN_OPEN_PRICE_MISSING:
+            planned_buy_price = 0
+            entry_mode = "BASE_PRICE_MISSING_SKIP"
+        elif INITIAL_ENTRY_BY_OPEN_ENABLED and initial_entry_price > 0:
+            entry_mode, planned_buy_price, open_drop_pct = _initial_entry_mode_by_open(base_price, now_price, initial_entry_price)
         else:
             planned_buy_price = _calc_limit_buy_price(stk_cd, now_price) if buy_order_type == "LIMIT" else now_price
             entry_mode = buy_order_type
@@ -1337,8 +1823,10 @@ def _make_order_plan(client: KiwoomClient, cur_entr: int) -> list[dict[str, Any]
                 "budget": budget,
                 "dca_reserve_budget": math.floor(cur_entr * DCA_RESERVE_CASH_RATE * weight),
                 "now_price": now_price,
-                "open_price": open_price,
+                "open_price": base_price,
+                "base_price": base_price,
                 "initial_entry_price": initial_entry_price,
+                "open_drop_pct": open_drop_pct,
                 "entry_mode": entry_mode,
                 "planned_buy_price": planned_buy_price,
                 "buy_order_type": buy_order_type,
@@ -1367,7 +1855,8 @@ def _print_order_plan(plans: list[dict[str, Any]], cur_entr: int) -> None:
             f"{plan['stk_nm']}[{plan['stk_cd']}] "
             f"비중 {plan['weight'] * 100:.0f}% / "
             f"최초진입예산 {format(plan['budget'], ',')}원 / DCA예비예산 {format(plan.get('dca_reserve_budget', 0), ',')}원 / "
-            f"시가 {format(plan.get('open_price', 0), ',')}원 / 현재가 {format(plan['now_price'], ',')}원 / "
+            f"{_initial_entry_base_price_label()} {format(plan.get('open_price', 0), ',')}원 / 현재가 {format(plan['now_price'], ',')}원 "
+            f"({plan.get('open_drop_pct', 0.0):+.2f}%) / "
             f"진입방식 {plan.get('entry_mode', plan.get('buy_order_type', 'MARKET'))} / "
             f"진입기준가 {format(plan.get('planned_buy_price', plan['now_price']), ',')}원 / "
             f"예상수량 {plan['qty']}주 / "
@@ -1380,8 +1869,10 @@ def _print_order_plan(plans: list[dict[str, Any]], cur_entr: int) -> None:
     print(f"총 예상 매수금액: {format(total_expected, ',')}원")
     print(f"예상 최초 진입 후 DCA/잔여 주문가능금액: {format(cur_entr - total_expected, ',')}원")
     if INITIAL_ENTRY_BY_OPEN_ENABLED:
-        print(f"※ 최초 진입 조건 사용: 오늘 시가 대비 -{INITIAL_ENTRY_OPEN_DISCOUNT_PCT:.2f}% 이하에서 진입합니다.")
-        print("※ 이미 기준가 이하이면 시장가로 즉시 진입하고, 아니면 기준가에 지정가 주문 후 체결을 감시합니다.")
+        print(f"※ 최초 진입 조건: {INITIAL_ENTRY_CONDITION_MODE} / {_initial_entry_base_price_label()} 대비 -{INITIAL_ENTRY_DISCOUNT_PCT:.2f}% 이하에서 진입합니다.")
+        print(f"※ {_initial_entry_base_price_label()} 대비 {INITIAL_ENTRY_MARKET_DROP_MIN_PCT:.2f}%~{INITIAL_ENTRY_MARKET_DROP_MAX_PCT:.2f}% 구간은 {INITIAL_ENTRY_IMMEDIATE_ORDER_TYPE} 방식으로 진입합니다.")
+        print(f"※ {INITIAL_ENTRY_MARKET_DROP_MAX_PCT:.2f}%보다 더 급락한 경우 현재가보다 {INITIAL_ENTRY_DEEP_DROP_LIMIT_BELOW_CURRENT_PCT:.2f}% 낮은 지정가로 대기합니다.")
+        print(f"※ 기준가격 조회 실패 시 현재가를 기준가격으로 대체하지 않습니다. 실패 종목은 최초 진입을 스킵합니다.")
     elif _buy_order_type() == "LIMIT":
         print(f"※ 지정가 매수 방식입니다. 주문기준가는 현재가 +{LIMIT_BUY_UP_PCT:.2f}%를 호가단위로 올림한 가격입니다.")
         print("※ 지정가보다 시장가격이 높으면 미체결될 수 있습니다.")
@@ -1701,7 +2192,8 @@ def _cancel_unfilled_orders_for_holdings(
                 results.append({"stk_cd": code, "ord_no": ord_no, "qty": qty, "error": str(exc)})
 
         # 종목별 조회가 API 과호출로 막히지 않게 약간 간격을 둡니다.
-        time.sleep(0.5)
+        if _sleep_interruptible(0.5):
+            break
 
     if results:
         time.sleep(ORDER_CANCEL_WAIT_SEC)
@@ -2039,7 +2531,7 @@ def _place_buy_then_takeprofit(client: KiwoomClient, stk_cd: str, buy_price: int
         elapsed_sec = int(now_ts - start_ts)
 
         try:
-            summ = client.get_order_fill_summary(buy_ord_no)
+            summ = _get_order_fill_summary_safe(client, buy_ord_no, label=f"{stk_cd} 체결조회")
         except Exception as exc:
             print(f"[{_now()}] {stk_cd} 체결 조회 중 오류 / {exc} / 남은시간 {remain_sec}초")
             time.sleep(float_poll)
@@ -2129,17 +2621,19 @@ def _watch_pending_initial_entries(
         print(
             f"{item['stk_nm']}[{item['stk_cd']}] 주문번호 {item['buy_ord_no']} / "
             f"주문가 {format(item['order_price'], ',')}원 / 주문수량 {item['qty']}주 / "
-            f"시가 {format(item.get('open_price', 0), ',')}원 / 현재가 {format(item.get('now_price', 0), ',')}원"
+            f"{_initial_entry_base_price_label()} {format(item.get('open_price', 0), ',')}원 / 현재가 {format(item.get('now_price', 0), ',')}원 "
+            f"({item.get('open_drop_pct', 0.0):+.2f}%) / 진입방식 {item.get('entry_mode', '-')}"
         )
 
     active_pending = {_norm_code(item["stk_cd"]): item for item in pending_items}
     start_ts = time.time()
     last_print_ts = 0.0
 
-    while active_pending:
+    while active_pending and not STOP_EVENT.is_set() and not FORCE_EXIT_EVENT.is_set():
         if _force_exit_time_reached():
-            print(f"[{_now()}] 최초 진입 대기 중 마감 시간이 도달했습니다. 미체결 주문을 취소하고 대기를 종료합니다.")
+            print(f"[{_now()}] 최초 진입 대기 중 마감 시간이 도달했습니다. 미체결 주문을 취소하고 전체 청산을 실행합니다.")
             _cancel_unfilled_orders(client, target_codes=set(active_pending.keys()), only_sell_orders=False, reason="최초 진입 미체결 취소")
+            _force_exit_once(client)
             break
 
         if INITIAL_ENTRY_LIMIT_ORDER_TIMEOUT_SEC and INITIAL_ENTRY_LIMIT_ORDER_TIMEOUT_SEC > 0:
@@ -2158,7 +2652,7 @@ def _watch_pending_initial_entries(
             filled_qty = 0
             buy_avg_price = 0
             try:
-                summ = client.get_order_fill_summary(buy_ord_no)
+                summ = _get_order_fill_summary_safe(client, buy_ord_no, label=f"{stk_cd} 체결조회")
                 ord_qty = _safe_int(summ.get("ord_qty"), qty)
                 filled_qty = _safe_int(summ.get("filled_qty"), 0)
                 buy_avg_price = _safe_int(summ.get("avg_price"), 0)
@@ -2233,7 +2727,7 @@ def _watch_pending_initial_entries(
                         price=buy_avg_price,
                         base_price=buy_avg_price,
                         order_no=buy_ord_no,
-                        memo="오늘 시가 대비 조건부 최초 진입 지정가 체결",
+                        memo=f"{_initial_entry_base_price_label()} 대비 조건부 최초 진입 지정가 체결",
                         state=STATE_NORMAL,
                         cycle=0,
                         take_profit_price=take_profit_price,
@@ -2252,7 +2746,15 @@ def _watch_pending_initial_entries(
             last_print_ts = time.time()
 
         if active_pending:
-            time.sleep(INITIAL_ENTRY_CHECK_SEC)
+            if _sleep_interruptible(INITIAL_ENTRY_CHECK_SEC):
+                break
+
+    if STOP_EVENT.is_set() and active_pending:
+        print(f"[{_now()}] 사용자 중단 요청으로 최초 진입 대기 중인 미체결 매수 주문을 취소합니다.")
+        try:
+            _cancel_unfilled_orders(client, target_codes=set(active_pending.keys()), only_sell_orders=False, reason="사용자 중단으로 최초 진입 미체결 취소")
+        except Exception as exc:
+            print(f"[{_now()}] 사용자 중단 미체결 취소 실패: {exc}")
 
     return results, stop_watch_items
 
@@ -2358,7 +2860,7 @@ def _place_market_rebuy_then_takeprofit(client: KiwoomClient, item: dict[str, An
         poll_count += 1
         remain_sec = max(0, int(deadline - time.time()))
         try:
-            summ = client.get_order_fill_summary(buy_ord_no)
+            summ = _get_order_fill_summary_safe(client, buy_ord_no, label=f"{stk_cd} 체결조회")
             ord_qty = _safe_int(summ.get("ord_qty"), actual_order_qty)
             filled_qty = _safe_int(summ.get("filled_qty"), 0)
             avg = _safe_int(summ.get("avg_price"), 0)
@@ -2651,7 +3153,7 @@ def _place_dca_buy(client: KiwoomClient, stk_cd: str, stk_nm: str, budget: int, 
         poll_count += 1
         remain_sec = max(0, int(deadline - time.time()))
         try:
-            summ = client.get_order_fill_summary(buy_ord_no)
+            summ = _get_order_fill_summary_safe(client, buy_ord_no, label=f"{stk_cd} 체결조회")
             ord_qty = _safe_int(summ.get("ord_qty"), actual_qty)
             filled_qty = _safe_int(summ.get("filled_qty"), 0)
             avg_price = _safe_int(summ.get("avg_price"), 0)
@@ -3020,11 +3522,9 @@ def _watch_stop_loss(client: KiwoomClient, watch_items: list[dict[str, Any]]) ->
     print("Ctrl+C를 누르면 DCA 감시를 중단합니다.")
 
     try:
-        while active:
+        while active and not STOP_EVENT.is_set():
             if _force_exit_time_reached():
-                _print_force_exit_header()
-                print(f"[{_now()}] DCA 감시를 중단하고 전체 청산을 실행합니다.")
-                _run_sell_all_mode(client, auto_yes=True)
+                _force_exit_once(client)
                 return
 
             remove_codes: list[str] = []
@@ -3036,7 +3536,8 @@ def _watch_stop_loss(client: KiwoomClient, watch_items: list[dict[str, Any]]) ->
                 if should_print:
                     print(f"[{_now()}] 잔고 조회 결과가 비어 있어 이번 DCA 감시 회차는 건너뜁니다. 감시 대상은 유지합니다.")
                     last_print_time = now_ts
-                time.sleep(STOP_LOSS_CHECK_SEC)
+                if _sleep_interruptible(STOP_LOSS_CHECK_SEC):
+                    break
                 continue
 
             for stk_cd, item in list(active.items()):
@@ -3195,11 +3696,13 @@ def _watch_stop_loss(client: KiwoomClient, watch_items: list[dict[str, Any]]) ->
                 active.pop(stk_cd, None)
 
             if active:
-                time.sleep(STOP_LOSS_CHECK_SEC)
+                if _sleep_interruptible(STOP_LOSS_CHECK_SEC):
+                    break
 
         print(f"[{_now()}] 모든 DCA 감시 대상이 종료되었습니다.")
 
     except KeyboardInterrupt:
+        STOP_EVENT.set()
         print(f"\n[{_now()}] 사용자 중단(Ctrl+C). DCA 감시를 종료합니다.")
 
 
@@ -3374,8 +3877,8 @@ def _run_restore_mode(client: KiwoomClient, restore_items: list[dict[str, Any]],
                 "buy_ord_no": "RESTORE_MODE",
                 "take_profit_ord_no": take_profit_ord_no,
                 "take_profit_price": take_profit_price,
-                "entry_price": buy_avg_price,
-                "strategy_base_price": buy_avg_price,
+                "entry_price": int(item["buy_avg_price"]),
+                "strategy_base_price": int(item["buy_avg_price"]),
                 "state": STATE_NORMAL,
                 "rebuy_count": 0,
                 "dca_step": 0,
@@ -3394,13 +3897,23 @@ def _run_restore_mode(client: KiwoomClient, restore_items: list[dict[str, Any]],
 # ===============================
 # 전체 시장가 매도 초기화 모드
 # ===============================
-
 def _run_sell_all_mode(client: KiwoomClient, auto_yes: bool = False) -> None:
-    """현재 계좌의 미체결 주문을 먼저 모두 취소한 뒤, 보유 중인 모든 종목을 시장가로 매도합니다."""
+    """현재 계좌의 모든 미체결 주문(매수/매도)을 먼저 취소한 뒤, 보유 중인 모든 종목을 시장가로 매도합니다."""
     print("\n" + "=" * 72)
     print(f"[{_now()}] 전체 보유종목 시장가 매도 초기화 모드")
     print("=" * 72)
-    print("※ 기존 익절 지정가 등 미체결 주문을 먼저 전체 취소한 뒤 시장가 매도합니다.")
+    print("※ 기존 매수 예약/익절 지정가 등 모든 미체결 주문을 먼저 전체 취소한 뒤 시장가 매도합니다.")
+
+    if not TEST_MODE:
+        print(f"[{_now()}] 미체결 주문 전체 취소를 시작합니다. 매수 예약과 매도 예약을 모두 취소합니다.")
+        cancel_results = _cancel_unfilled_orders(
+            client,
+            target_codes=None,
+            only_sell_orders=False,
+            reason="전체 청산 전 모든 미체결 주문 취소",
+        )
+        print(f"[{_now()}] 전체 미체결 주문 취소 처리 건수: {len(cancel_results)}")
+        time.sleep(ORDER_CANCEL_WAIT_SEC)
 
     if not TEST_MODE and not hasattr(client, "get_my_all_stock"):
         raise AttributeError("KiwoomClient에 get_my_all_stock() 함수가 없습니다.")
@@ -3414,7 +3927,12 @@ def _run_sell_all_mode(client: KiwoomClient, auto_yes: bool = False) -> None:
             code = _norm_code(target["code"])
             qty = _test_sellable_qty(code, 0)
             if qty > 0:
-                preview_items.append({"stk_cd": code, "stk_nm": target.get("name", code), "holding_qty": qty, "sellable_qty": qty})
+                preview_items.append({
+                    "stk_cd": code,
+                    "stk_nm": target.get("name", code),
+                    "holding_qty": qty,
+                    "sellable_qty": qty,
+                })
     else:
         balance_map = _get_balance_map(client, force_refresh=True)
         preview_items = []
@@ -3423,10 +3941,15 @@ def _run_sell_all_mode(client: KiwoomClient, auto_yes: bool = False) -> None:
             sellable_qty = _safe_int(stock.get("trde_able_qty"), 0)
             name = stock.get("stk_nm") or stock.get("name") or code
             if holding_qty > 0 or sellable_qty > 0:
-                preview_items.append({"stk_cd": code, "stk_nm": name, "holding_qty": holding_qty, "sellable_qty": sellable_qty})
+                preview_items.append({
+                    "stk_cd": code,
+                    "stk_nm": name,
+                    "holding_qty": holding_qty,
+                    "sellable_qty": sellable_qty,
+                })
 
     if not preview_items:
-        print(f"[{_now()}] 보유종목이 없습니다.")
+        print(f"[{_now()}] 보유종목이 없습니다. 미체결 주문 취소만 완료하고 종료합니다.")
         return
 
     print("초기화 대상 보유종목")
@@ -3437,23 +3960,20 @@ def _run_sell_all_mode(client: KiwoomClient, auto_yes: bool = False) -> None:
         )
 
     if not auto_yes:
-        if not _confirm_execution("미체결 주문을 전체 취소한 뒤 위 보유종목을 시장가로 매도하시겠습니까?"):
+        if not _confirm_execution("위 보유종목을 시장가로 매도하시겠습니까?"):
             print(f"[{_now()}] 사용자가 전체 초기화를 취소했습니다.")
             return
 
-    if TEST_MODE:
-        print(f"[{_now()}] [TEST] 미체결 전체 취소 생략")
-    else:
-        print(f"[{_now()}] 미체결 주문 전체 취소를 시작합니다.")
+    if not TEST_MODE:
         holding_codes = {_norm_code(item["stk_cd"]) for item in preview_items}
-        cancel_results = _cancel_unfilled_orders(client, target_codes=None, only_sell_orders=False, reason="전체 청산 전")
-        # 전체 조회가 0건이어도 익절 주문이 걸려 매도가능수량이 0일 수 있으므로 보유종목별 매도 미체결도 추가 확인합니다.
-        extra_cancel_results = _cancel_unfilled_orders_for_holdings(client, holding_codes, reason="전체 청산 전 보유종목별 추가 확인")
-        cancel_results.extend(extra_cancel_results)
-        print(f"[{_now()}] 미체결 취소 처리 건수: {len(cancel_results)}")
+        extra_cancel_results = _cancel_unfilled_orders_for_holdings(
+            client,
+            holding_codes,
+            reason="전체 청산 전 보유종목별 추가 매도 미체결 확인",
+        )
+        print(f"[{_now()}] 보유종목별 추가 미체결 매도 취소 처리 건수: {len(extra_cancel_results)}")
         time.sleep(ORDER_CANCEL_WAIT_SEC)
 
-    # 취소 반영 후 다시 매도가능수량 확인
     if TEST_MODE:
         sell_items = []
         for item in preview_items:
@@ -3492,8 +4012,6 @@ def _run_sell_all_mode(client: KiwoomClient, auto_yes: bool = False) -> None:
                 sell_ord_no = "TEST_SELL_ALL_MARKET_NOT_SENT"
                 print(f"[{_now()}] [TEST] {stk_nm}[{stk_cd}] 시장가 매도 생략 / 가상주문번호 {sell_ord_no} / 수량 {qty}주")
             else:
-                # 종목별 매도 직전에 잔고를 다시 조회합니다.
-                # 첫 번째 종목 매도 후 잔고/매도가능수량이 변해도 두 번째 종목에 잘못된 수량이 들어가지 않게 합니다.
                 balance_map = _get_balance_map(client, force_refresh=True)
                 stock = balance_map.get(stk_cd, {})
                 qty = _safe_int(stock.get("trde_able_qty"), 0)
@@ -3505,6 +4023,7 @@ def _run_sell_all_mode(client: KiwoomClient, auto_yes: bool = False) -> None:
                 if qty <= 0:
                     print(f"[{_now()}] [전체청산] {stk_nm}[{stk_cd}] 매도가능수량 0주로 시장가 매도 생략")
                     continue
+
                 sell_ord_no = client.place_sell_market(stk_cd, qty)
                 sell_ord_no = _require_valid_order_no(sell_ord_no, f"{stk_cd} 전체 시장가 매도")
                 print(f"[{_now()}] [전체청산] {stk_nm}[{stk_cd}] 시장가 매도 접수 / 주문번호 {sell_ord_no} / 수량 {qty}주")
@@ -3514,6 +4033,7 @@ def _run_sell_all_mode(client: KiwoomClient, auto_yes: bool = False) -> None:
 
     if not TEST_MODE:
         time.sleep(2)
+
     print(f"[{_now()}] 전체 청산 절차가 종료되었습니다. 청산 후 계좌 정보를 조회합니다.")
     _print_account_after_liquidation(client)
 
@@ -3532,7 +4052,12 @@ def main() -> None:
     set_test_mode(b_Tprint)
     print(f"TEST_MODE - {TEST_MODE} - [MAIN] KODEX SK하이닉스/삼성전자 단일종목레버리지 50:50 자동매수 APP 시작")
     print(f"BUY_ORDER_TYPE - {_buy_order_type()} - LIMIT이면 지정가 매수, MARKET이면 시장가 매수로 실행합니다.")
-    print(f"INITIAL_ENTRY_BY_OPEN_ENABLED - {INITIAL_ENTRY_BY_OPEN_ENABLED} / INITIAL_ENTRY_OPEN_DISCOUNT_PCT - {INITIAL_ENTRY_OPEN_DISCOUNT_PCT:.2f}% - 오늘 시가 대비 조건부 최초 진입")
+    print(f"INITIAL_ENTRY_BY_OPEN_ENABLED - {INITIAL_ENTRY_BY_OPEN_ENABLED} / INITIAL_ENTRY_BASE_PRICE_MODE - {INITIAL_ENTRY_BASE_PRICE_MODE} / INITIAL_ENTRY_OPEN_DISCOUNT_PCT - {INITIAL_ENTRY_DISCOUNT_PCT:.2f}% - 선택 기준가격 대비 조건부 최초 진입")
+    print(f"ALLOW_OPEN_PRICE_FALLBACK_TO_LAST_PRICE - {ALLOW_OPEN_PRICE_FALLBACK_TO_LAST_PRICE} - False이면 시가 실패 시 현재가 대체 금지")
+    print(f"SKIP_INITIAL_ENTRY_WHEN_OPEN_PRICE_MISSING - {SKIP_INITIAL_ENTRY_WHEN_OPEN_PRICE_MISSING} - True이면 시가 실패 종목 최초 진입 스킵")
+    print(f"ORDER_FILL_QUERY_MIN_INTERVAL_SEC - {ORDER_FILL_QUERY_MIN_INTERVAL_SEC:.1f}초 - kt00009 체결조회 과호출 방지")
+    print(f"INITIAL_ENTRY_MARKET_DROP_RANGE - {INITIAL_ENTRY_MARKET_DROP_MIN_PCT:.2f}% ~ {INITIAL_ENTRY_MARKET_DROP_MAX_PCT:.2f}% - 이 구간은 {INITIAL_ENTRY_IMMEDIATE_ORDER_TYPE} 방식으로 즉시 진입")
+    print(f"INITIAL_ENTRY_DEEP_DROP_LIMIT_BELOW_CURRENT_PCT - {INITIAL_ENTRY_DEEP_DROP_LIMIT_BELOW_CURRENT_PCT:.2f}% - 급락 구간은 현재가보다 이 비율 낮은 지정가 대기")
     if _buy_order_type() == "LIMIT":
         print(f"LIMIT_BUY_UP_PCT - {LIMIT_BUY_UP_PCT:.2f}% - 현재가보다 이 비율만큼 높은 가격을 호가단위 올림하여 지정가 매수합니다.")
     print(f"TAKE_PROFIT_REBUY_ENABLED - {TAKE_PROFIT_REBUY_ENABLED} - 익절 체결 시 같은 종목을 재매수합니다.")
@@ -3612,20 +4137,29 @@ def main() -> None:
         planned_buy_price = int(plan.get("planned_buy_price", now_price) or now_price)
         qty = int(plan["qty"])
 
+        if INITIAL_ENTRY_BY_OPEN_ENABLED and open_price <= 0 and SKIP_INITIAL_ENTRY_WHEN_OPEN_PRICE_MISSING:
+            print(
+                f"[{_now()}] {stk_nm}[{stk_cd}] {_initial_entry_base_price_label()} 조회 실패로 최초 진입을 스킵합니다. "
+                "현재가를 기준가격으로 대체하지 않습니다."
+            )
+            continue
+
         if INITIAL_ENTRY_BY_OPEN_ENABLED and entry_price > 0:
             try:
                 now_price = _safe_int(client.get_last_price(stk_cd), now_price)
             except Exception:
                 pass
 
-            # 현재가가 이미 시가 대비 -2% 기준 이하라면 시장가로 바로 진입합니다.
-            if INITIAL_ENTRY_MARKET_IF_ALREADY_BELOW and now_price <= entry_price:
+            entry_mode, entry_order_price, open_drop_pct = _initial_entry_mode_by_open(open_price, now_price, entry_price)
+
+            if INITIAL_ENTRY_MARKET_IF_ALREADY_BELOW and _entry_mode_is_market(entry_mode):
                 buy_price_for_qty = max(1, now_price)
                 qty = int(budget // buy_price_for_qty)
                 print(
-                    f"[{_now()}] {stk_nm}[{stk_cd}] 이미 최초 진입 기준 이하 / "
-                    f"시가 {format(open_price, ',')}원 / 기준 {format(entry_price, ',')}원 / 현재 {format(now_price, ',')}원 "
-                    f"-> 시장가 즉시 진입 / 예산 {format(budget, ',')}원 / 수량 {qty}주"
+                    f"[{_now()}] {stk_nm}[{stk_cd}] 최초 진입 즉시 조건 충족 / "
+                    f"{_initial_entry_base_price_label()} {format(open_price, ',')}원 / 기준 {format(entry_price, ',')}원 / "
+                    f"현재 {format(now_price, ',')}원({open_drop_pct:+.2f}%) / 진입방식 {entry_mode} -> 즉시 진입 / "
+                    f"예산 {format(budget, ',')}원 / 수량 {qty}주"
                 )
                 if qty < 1:
                     print(f"[{_now()}] {stk_nm}[{stk_cd}] 매수 가능 수량이 0주라서 건너뜁니다.")
@@ -3636,11 +4170,19 @@ def main() -> None:
                     print(f"[{_now()}] {stk_nm}[{stk_cd}] 최초 진입 시장가 주문 실패: {exc}")
                     continue
             else:
-                qty = int(budget // entry_price) if entry_price > 0 else 0
+                limit_price = int(entry_order_price or entry_price)
+                qty = int(budget // limit_price) if limit_price > 0 else 0
+                if entry_mode in ("OPEN_DEEP_DROP_LIMIT", "BASE_DEEP_DROP_LIMIT"):
+                    reason_text = f"급락 구간({open_drop_pct:+.2f}%)이라 추격매수 대신 현재가보다 {INITIAL_ENTRY_DEEP_DROP_LIMIT_BELOW_CURRENT_PCT:.2f}% 낮은 지정가 대기"
+                elif entry_mode in ("OPEN_WAIT_LIMIT", "BASE_WAIT_LIMIT"):
+                    reason_text = f"아직 최초 진입 기준 미도달({open_drop_pct:+.2f}%)이라 {_initial_entry_base_price_label()} -{INITIAL_ENTRY_DISCOUNT_PCT:.2f}% 기준가 대기"
+                else:
+                    reason_text = f"조건 충족({open_drop_pct:+.2f}%)으로 현재가 지정가 일반매수" if entry_mode in ("BASE_DISCOUNT_LIMIT_CURRENT", "BASE_DEEP_DROP_LIMIT_CURRENT", "CURRENT_LIMIT") else f"조건부 지정가 대기({open_drop_pct:+.2f}%)"
                 print(
                     f"[{_now()}] {stk_nm}[{stk_cd}] 최초 진입 지정가 대기 주문 / "
-                    f"시가 {format(open_price, ',')}원 / 기준 {format(entry_price, ',')}원(-{INITIAL_ENTRY_OPEN_DISCOUNT_PCT:.2f}%) / "
-                    f"현재 {format(now_price, ',')}원 / 예산 {format(budget, ',')}원 / 수량 {qty}주"
+                    f"{_initial_entry_base_price_label()} {format(open_price, ',')}원 / 기준대비 {open_drop_pct:+.2f}% / "
+                    f"기준 {format(entry_price, ',')}원 / 주문가 {format(limit_price, ',')}원 / 현재 {format(now_price, ',')}원 / "
+                    f"예산 {format(budget, ',')}원 / 수량 {qty}주 / {reason_text}"
                 )
                 if qty < 1:
                     print(f"[{_now()}] {stk_nm}[{stk_cd}] 최초 진입 지정가 수량이 0주라서 건너뜁니다.")
@@ -3648,12 +4190,12 @@ def main() -> None:
                 try:
                     if TEST_MODE or b_Test:
                         # TEST에서는 바로 체결 가정으로 넘깁니다.
-                        oto_result = _place_limit_buy_at_exact_price_then_takeprofit(client, stk_cd, qty, entry_price, label="시가대비조건 최초진입")
+                        oto_result = _place_limit_buy_at_exact_price_then_takeprofit(client, stk_cd, qty, limit_price, label="시가대비조건 최초진입")
                     else:
-                        buy_ord_no, actual_qty, actual_order_price = _place_buy_limit_with_retry(client, stk_cd, qty, entry_price)
+                        buy_ord_no, actual_qty, actual_order_price = _place_buy_limit_with_retry(client, stk_cd, qty, limit_price)
                         print(
                             f"[{_now()}] {stk_nm}[{stk_cd}] 최초 진입 지정가 주문 접수 / "
-                            f"주문번호 {buy_ord_no} / 주문가 {format(actual_order_price, ',')}원 / 주문수량 {actual_qty}주"
+                            f"주문번호 {buy_ord_no} / 주문가 {format(actual_order_price, ',')}원 / 주문수량 {actual_qty}주 / 진입방식 {entry_mode}"
                         )
                         pending_initial_entries.append(
                             {
@@ -3662,6 +4204,8 @@ def main() -> None:
                                 "budget": budget,
                                 "dca_reserve_budget": int(plan.get("dca_reserve_budget", 0) or 0),
                                 "open_price": open_price,
+                                "open_drop_pct": open_drop_pct,
+                                "entry_mode": entry_mode,
                                 "now_price": now_price,
                                 "order_price": actual_order_price,
                                 "qty": actual_qty,
@@ -3806,16 +4350,432 @@ def main() -> None:
         print(f"[{_now()}] 주문 후 계좌 주문가능금액: {format(_safe_int(cur_entr_after), ',')}원")
     except Exception as exc:
         print(f"[{_now()}] 주문 후 계좌 주문가능금액 조회 실패: {exc}")
-
+        
     if STOP_LOSS_WATCH_ENABLED:
         _watch_stop_loss(client, stop_watch_items)
     else:
         print(f"[{_now()}] DCA트리거 자동 감시는 비활성화되어 있습니다. STOP_LOSS_WATCH_ENABLED=True로 변경하면 감시를 시작합니다.")
 
     _print_trade_report()
-    print(f"[{_now()}] 완료")
-    _close_log_tee()
+    print
 
+
+# ===============================
+# v3.2.0 종목별 독립 스레드 실행
+# ===============================
+
+def _build_watch_item_from_oto_result(plan: dict[str, Any], oto_result: dict[str, Any], now_price: int, qty: int) -> tuple[dict[str, Any], dict[str, Any]]:
+    stk_cd = _norm_code(plan["stk_cd"])
+    stk_nm = str(plan["stk_nm"])
+    buy_ord_no = oto_result.get("buy_ord_no")
+    buy_avg_price = int(oto_result.get("buy_avg_price") or now_price)
+    filled_qty = int(oto_result.get("buy_qty") or qty)
+    take_profit_price = int(oto_result.get("take_profit_price") or 0)
+    take_profit_ord_no = oto_result.get("take_profit_ord_no")
+    stop_loss_price = _calc_stop_loss_price(stk_cd, buy_avg_price)
+    take_profit_pct = _take_profit_pct(stk_cd)
+    stop_loss_pct = _stop_loss_pct(stk_cd)
+
+    result = {
+        "stk_nm": stk_nm,
+        "stk_cd": stk_cd,
+        "qty": filled_qty,
+        "buy_avg_price": buy_avg_price,
+        "take_profit_pct": take_profit_pct,
+        "stop_loss_pct": stop_loss_pct,
+        "take_profit_price": take_profit_price,
+        "stop_loss_price": stop_loss_price,
+        "buy_ord_no": buy_ord_no,
+        "take_profit_ord_no": take_profit_ord_no,
+    }
+
+    watch_item = {
+        "stk_nm": stk_nm,
+        "stk_cd": stk_cd,
+        "qty": filled_qty,
+        "buy_avg_price": buy_avg_price,
+        "entry_price": buy_avg_price,
+        "strategy_base_price": buy_avg_price,
+        "state": STATE_NORMAL,
+        "rebuy_count": 0,
+        "dca_step": 0,
+        "dca_reserve_total": int(plan.get("dca_reserve_budget", 0) or 0),
+        "dca_used_amount": 0,
+        "no_buy_touch_count": 0,
+        "take_profit_pct": take_profit_pct,
+        "take_profit_price": take_profit_price,
+        "stop_loss_pct": stop_loss_pct,
+        "stop_loss_price": stop_loss_price,
+        "buy_ord_no": buy_ord_no,
+        "take_profit_ord_no": take_profit_ord_no,
+    }
+    return result, watch_item
+
+
+def _print_worker_order_result(result: dict[str, Any]) -> None:
+    print(
+        f"[{_now()}] [종목워커-주문등록] {result['stk_nm']}[{result['stk_cd']}] "
+        f"{result['qty']}주 / 매수가 {format(result['buy_avg_price'], ',')}원 / "
+        f"익절 {result['take_profit_pct']:.1f}% {format(result['take_profit_price'], ',')}원 / "
+        f"DCA트리거 {result['stop_loss_pct']:.1f}% {format(result['stop_loss_price'], ',')}원 / "
+        f"매수주문번호 {result['buy_ord_no']} / 익절주문번호 {result['take_profit_ord_no']}"
+    )
+
+
+def _run_single_stock_worker(
+    client: KiwoomClient,
+    plan: dict[str, Any],
+    results: list[dict[str, Any]],
+    results_lock: threading.Lock,
+) -> None:
+    """종목 1개의 최초 진입, 체결 대기, 익절 등록, DCA 감시를 독립적으로 실행합니다."""
+    stk_cd = _norm_code(plan["stk_cd"])
+    stk_nm = str(plan["stk_nm"])
+    thread_name = threading.current_thread().name
+
+    try:
+        print(f"[{_now()}] [{thread_name}] {stk_nm}[{stk_cd}] 종목 워커 시작")
+
+        if FORCE_EXIT_EVENT.is_set():
+            print(f"[{_now()}] [{thread_name}] 이미 마감 청산이 시작되어 종목 워커를 종료합니다.")
+            return
+
+        budget = int(plan["budget"])
+        now_price = int(plan["now_price"])
+        base_price = int(plan.get("open_price", now_price) or now_price)
+        entry_price = int(plan.get("initial_entry_price", 0) or 0)
+
+        if INITIAL_ENTRY_BY_OPEN_ENABLED and base_price <= 0 and SKIP_INITIAL_ENTRY_WHEN_OPEN_PRICE_MISSING:
+            print(
+                f"[{_now()}] [{thread_name}] {stk_nm}[{stk_cd}] {_initial_entry_base_price_label()} 조회 실패로 최초 진입을 스킵합니다. "
+                "현재가를 기준가격으로 대체하지 않습니다."
+            )
+            return
+
+        oto_result: dict[str, Any] | None = None
+        watch_item: dict[str, Any] | None = None
+
+        if INITIAL_ENTRY_BY_OPEN_ENABLED and entry_price > 0:
+            try:
+                now_price = _safe_int(client.get_last_price(stk_cd), now_price)
+            except Exception:
+                pass
+
+            entry_mode, entry_order_price, open_drop_pct = _initial_entry_mode_by_open(base_price, now_price, entry_price)
+
+            if INITIAL_ENTRY_MARKET_IF_ALREADY_BELOW and _entry_mode_is_market(entry_mode):
+                buy_price_for_qty = max(1, now_price)
+                qty = int(budget // buy_price_for_qty)
+                print(
+                    f"[{_now()}] [{thread_name}] {stk_nm}[{stk_cd}] 최초 진입 즉시 조건 충족 / "
+                    f"{_initial_entry_base_price_label()} {format(base_price, ',')}원 / 기준 {format(entry_price, ',')}원 / "
+                    f"현재 {format(now_price, ',')}원({open_drop_pct:+.2f}%) / 진입방식 {entry_mode} -> 즉시 진입 / "
+                    f"예산 {format(budget, ',')}원 / 수량 {qty}주"
+                )
+                if qty < 1:
+                    print(f"[{_now()}] [{thread_name}] {stk_nm}[{stk_cd}] 매수 가능 수량이 0주라서 건너뜁니다.")
+                    return
+                oto_result = _place_market_buy_force_then_takeprofit(client=client, stk_cd=stk_cd, qty=qty, ref_price=now_price, label="스레드 최초진입")
+                result, watch_item = _build_watch_item_from_oto_result(plan, oto_result, now_price, qty)
+                _log_trade_event(
+                    event="BUY",
+                    stk_cd=stk_cd,
+                    stk_nm=stk_nm,
+                    qty=result["qty"],
+                    price=result["buy_avg_price"],
+                    base_price=result["buy_avg_price"],
+                    order_no=result["buy_ord_no"],
+                    memo="스레드 최초 매수",
+                    state=STATE_NORMAL,
+                    cycle=0,
+                    take_profit_price=result["take_profit_price"],
+                    stop_loss_price=result["stop_loss_price"],
+                )
+                with results_lock:
+                    results.append(result)
+                _print_worker_order_result(result)
+
+            else:
+                limit_price = int(entry_order_price or entry_price)
+                qty = int(budget // limit_price) if limit_price > 0 else 0
+                if entry_mode in ("OPEN_DEEP_DROP_LIMIT", "BASE_DEEP_DROP_LIMIT"):
+                    reason_text = f"급락 구간({open_drop_pct:+.2f}%)이라 추격매수 대신 현재가보다 {INITIAL_ENTRY_DEEP_DROP_LIMIT_BELOW_CURRENT_PCT:.2f}% 낮은 지정가 대기"
+                elif entry_mode in ("OPEN_WAIT_LIMIT", "BASE_WAIT_LIMIT"):
+                    reason_text = f"아직 최초 진입 기준 미도달({open_drop_pct:+.2f}%)이라 {_initial_entry_base_price_label()} -{INITIAL_ENTRY_DISCOUNT_PCT:.2f}% 기준가 대기"
+                else:
+                    reason_text = f"조건 충족({open_drop_pct:+.2f}%)으로 현재가 지정가 일반매수" if entry_mode in ("BASE_DISCOUNT_LIMIT_CURRENT", "BASE_DEEP_DROP_LIMIT_CURRENT", "CURRENT_LIMIT") else f"조건부 지정가 대기({open_drop_pct:+.2f}%)"
+
+                print(
+                    f"[{_now()}] [{thread_name}] {stk_nm}[{stk_cd}] 최초 진입 지정가 대기 주문 / "
+                    f"{_initial_entry_base_price_label()} {format(base_price, ',')}원 / 기준대비 {open_drop_pct:+.2f}% / "
+                    f"기준 {format(entry_price, ',')}원 / 주문가 {format(limit_price, ',')}원 / 현재 {format(now_price, ',')}원 / "
+                    f"예산 {format(budget, ',')}원 / 수량 {qty}주 / {reason_text}"
+                )
+
+                if qty < 1:
+                    print(f"[{_now()}] [{thread_name}] {stk_nm}[{stk_cd}] 최초 진입 지정가 수량이 0주라서 건너뜁니다.")
+                    return
+
+                if TEST_MODE or b_Test:
+                    oto_result = _place_limit_buy_at_exact_price_then_takeprofit(client, stk_cd, qty, limit_price, label="스레드 최초진입")
+                    result, watch_item = _build_watch_item_from_oto_result(plan, oto_result, now_price, qty)
+                    _log_trade_event(
+                        event="BUY",
+                        stk_cd=stk_cd,
+                        stk_nm=stk_nm,
+                        qty=result["qty"],
+                        price=result["buy_avg_price"],
+                        base_price=result["buy_avg_price"],
+                        order_no=result["buy_ord_no"],
+                        memo="스레드 최초 지정가 TEST 체결",
+                        state=STATE_NORMAL,
+                        cycle=0,
+                        take_profit_price=result["take_profit_price"],
+                        stop_loss_price=result["stop_loss_price"],
+                    )
+                    with results_lock:
+                        results.append(result)
+                    _print_worker_order_result(result)
+                else:
+                    buy_ord_no, actual_qty, actual_order_price = _place_buy_limit_with_retry(client, stk_cd, qty, limit_price)
+                    print(
+                        f"[{_now()}] [{thread_name}] {stk_nm}[{stk_cd}] 최초 진입 지정가 주문 접수 / "
+                        f"주문번호 {buy_ord_no} / 주문가 {format(actual_order_price, ',')}원 / 주문수량 {actual_qty}주 / 진입방식 {entry_mode}"
+                    )
+                    pending_item = {
+                        "stk_nm": stk_nm,
+                        "stk_cd": stk_cd,
+                        "budget": budget,
+                        "dca_reserve_budget": int(plan.get("dca_reserve_budget", 0) or 0),
+                        "open_price": base_price,
+                        "open_drop_pct": open_drop_pct,
+                        "entry_mode": entry_mode,
+                        "now_price": now_price,
+                        "order_price": actual_order_price,
+                        "qty": actual_qty,
+                        "buy_ord_no": buy_ord_no,
+                    }
+                    pending_results, pending_watch_items = _watch_pending_initial_entries(client, [pending_item])
+                    with results_lock:
+                        results.extend(pending_results)
+                    for pending_result in pending_results:
+                        _print_worker_order_result(pending_result)
+                    if not pending_watch_items:
+                        print(f"[{_now()}] [{thread_name}] {stk_nm}[{stk_cd}] 최초 진입 체결 없이 워커를 종료합니다.")
+                        return
+                    watch_item = pending_watch_items[0]
+
+        else:
+            if not TEST_MODE:
+                try:
+                    cur_entr_now = _safe_int(client.get_current_entr(), 0)
+                    last_price_now = _safe_int(client.get_last_price(stk_cd), now_price)
+                    if _buy_order_type() == "LIMIT":
+                        order_price_now = _calc_limit_buy_price(stk_cd, last_price_now)
+                        safe_budget = min(budget, cur_entr_now)
+                        safe_qty = int(safe_budget // order_price_now) if order_price_now > 0 else int(plan["qty"])
+                        budget_label = f"지정가주문가능예산 {format(safe_budget, ',')}원"
+                    else:
+                        order_price_now = last_price_now
+                        safe_budget = min(budget, int(cur_entr_now * MARKET_BUY_CASH_SAFETY_RATE))
+                        safe_qty = int(safe_budget // last_price_now) if last_price_now > 0 else int(plan["qty"])
+                        budget_label = f"시장가안전예산 {format(safe_budget, ',')}원({MARKET_BUY_CASH_SAFETY_RATE*100:.0f}%)"
+
+                    if 0 < safe_qty < int(plan["qty"]):
+                        print(
+                            f"[{_now()}] [{thread_name}] {stk_nm}[{stk_cd}] 주문 직전 수량 조정 / "
+                            f"기존 {int(plan['qty'])}주 -> {safe_qty}주 / 주문가능금액 {format(cur_entr_now, ',')}원 / "
+                            f"{budget_label} / 현재가 {format(last_price_now, ',')}원 / 주문기준가 {format(order_price_now, ',')}원"
+                        )
+                        plan["qty"] = safe_qty
+                        now_price = last_price_now
+                except Exception as exc:
+                    print(f"[{_now()}] [{thread_name}] {stk_nm}[{stk_cd}] 주문 직전 주문가능금액/현재가 재확인 실패: {exc}")
+
+            qty = int(plan["qty"])
+            print(
+                f"[{_now()}] [{thread_name}] {stk_nm}[{stk_cd}] "
+                f"배정금액 {format(budget, ',')}원 / 현재가 {format(now_price, ',')}원 / "
+                f"매수방식 {_buy_order_type()} / 매수수량 {qty}주"
+            )
+
+            if qty < 1:
+                print(f"[{_now()}] [{thread_name}] {stk_nm}[{stk_cd}] 매수 가능 수량이 0주라서 건너뜁니다.")
+                return
+
+            oto_result = _place_buy_then_takeprofit(client=client, stk_cd=stk_cd, buy_price=now_price, qty=qty)
+            result, watch_item = _build_watch_item_from_oto_result(plan, oto_result, now_price, qty)
+            _log_trade_event(
+                event="BUY",
+                stk_cd=stk_cd,
+                stk_nm=stk_nm,
+                qty=result["qty"],
+                price=result["buy_avg_price"],
+                base_price=result["buy_avg_price"],
+                order_no=result["buy_ord_no"],
+                memo="스레드 최초 매수",
+                state=STATE_NORMAL,
+                cycle=0,
+                take_profit_price=result["take_profit_price"],
+                stop_loss_price=result["stop_loss_price"],
+            )
+            with results_lock:
+                results.append(result)
+            _print_worker_order_result(result)
+
+        if watch_item and STOP_LOSS_WATCH_ENABLED and not FORCE_EXIT_EVENT.is_set():
+            print(
+                f"[{_now()}] [{thread_name}] {stk_nm}[{stk_cd}] 매수/익절 등록 완료. "
+                "이 종목은 다른 종목 대기 여부와 관계없이 즉시 DCA 감시에 들어갑니다."
+            )
+            _watch_stop_loss(client, [watch_item])
+        elif watch_item:
+            print(f"[{_now()}] [{thread_name}] {stk_nm}[{stk_cd}] DCA트리거 자동 감시는 비활성화되어 있습니다.")
+
+    except Exception as exc:
+        print(f"[{_now()}] [{thread_name}] {stk_nm}[{stk_cd}] 종목 워커 오류: {exc}")
+
+
+def _run_stock_threads(client: KiwoomClient, order_plans: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """각 종목을 독립 스레드로 실행합니다."""
+    results: list[dict[str, Any]] = []
+    results_lock = threading.Lock()
+    threads: list[threading.Thread] = []
+
+    for plan in order_plans:
+        stk_cd = _norm_code(plan["stk_cd"])
+        stk_nm = str(plan["stk_nm"])
+        thread = threading.Thread(
+            target=_run_single_stock_worker,
+            args=(client, plan, results, results_lock),
+            name=f"WORKER-{stk_cd}",
+            daemon=False,
+        )
+        print(f"[{_now()}] {stk_nm}[{stk_cd}] 종목별 워커 스레드를 시작합니다.")
+        thread.start()
+        threads.append(thread)
+        # 동시에 주문 API가 몰리지 않도록 종목 시작 시점을 살짝 벌립니다.
+        if _sleep_interruptible(0.5):
+            break
+
+    try:
+        while any(thread.is_alive() for thread in threads):
+            for thread in threads:
+                thread.join(timeout=0.5)
+            if STOP_EVENT.is_set():
+                break
+    except KeyboardInterrupt:
+        STOP_EVENT.set()
+        print(f"\n[{_now()}] 사용자 중단(Ctrl+C). 전체 종목 워커에 종료 신호를 보냅니다.")
+        for thread in threads:
+            thread.join(timeout=2.0)
+
+    alive = [thread.name for thread in threads if thread.is_alive()]
+    if alive:
+        print(f"[{_now()}] 아직 종료되지 않은 워커가 있습니다: {alive}")
+
+    return results
+
+
+def main() -> None:
+    """v3.2.0 main: 종목별 스레드 실행 버전."""
+    args = _parse_args()
+    log_file = _setup_log_tee(args.log.strip() or None)
+    try:
+        restore_items, restore_auto_yes = _build_restore_items_from_config_and_args(args)
+
+        set_test_mode(b_Tprint)
+        print(f"TEST_MODE - {TEST_MODE} - [MAIN] KODEX SK하이닉스/삼성전자 단일종목레버리지 50:50 자동매수 APP 시작")
+        print("VERSION - 3.4.0 - 종목별 독립 스레드 + Ctrl+C 즉시 중단 개선 버전")
+        print(f"BUY_ORDER_TYPE - {_buy_order_type()} - LIMIT이면 지정가 매수, MARKET이면 시장가 매수로 실행합니다.")
+        print(f"INITIAL_ENTRY_BY_OPEN_ENABLED - {INITIAL_ENTRY_BY_OPEN_ENABLED} / INITIAL_ENTRY_BASE_PRICE_MODE - {INITIAL_ENTRY_BASE_PRICE_MODE} / INITIAL_ENTRY_OPEN_DISCOUNT_PCT - {INITIAL_ENTRY_DISCOUNT_PCT:.2f}% - 선택 기준가격 대비 조건부 최초 진입")
+        print(f"ALLOW_OPEN_PRICE_FALLBACK_TO_LAST_PRICE - {ALLOW_OPEN_PRICE_FALLBACK_TO_LAST_PRICE} - False이면 시가 실패 시 현재가 대체 금지")
+        print(f"SKIP_INITIAL_ENTRY_WHEN_OPEN_PRICE_MISSING - {SKIP_INITIAL_ENTRY_WHEN_OPEN_PRICE_MISSING} - True이면 시가 실패 종목 최초 진입 스킵")
+        print(f"ORDER_FILL_QUERY_MIN_INTERVAL_SEC - {ORDER_FILL_QUERY_MIN_INTERVAL_SEC:.1f}초 - kt00009 체결조회 과호출 방지")
+        print(f"INITIAL_ENTRY_MARKET_DROP_RANGE - {INITIAL_ENTRY_MARKET_DROP_MIN_PCT:.2f}% ~ {INITIAL_ENTRY_MARKET_DROP_MAX_PCT:.2f}% - 이 구간은 {INITIAL_ENTRY_IMMEDIATE_ORDER_TYPE} 방식으로 즉시 진입")
+        print(f"INITIAL_ENTRY_DEEP_DROP_LIMIT_BELOW_CURRENT_PCT - {INITIAL_ENTRY_DEEP_DROP_LIMIT_BELOW_CURRENT_PCT:.2f}% - 급락 구간은 현재가보다 이 비율 낮은 지정가 대기")
+        print("THREAD_MODE - True - 종목별 최초진입/체결대기/DCA감시를 독립 스레드로 실행합니다.")
+        print(f"TAKE_PROFIT_REBUY_ENABLED - {TAKE_PROFIT_REBUY_ENABLED} - 익절 체결 시 같은 종목을 재매수합니다.")
+        print(f"INITIAL_ENTRY_CASH_RATE - {INITIAL_ENTRY_CASH_RATE:.2f} - 최초 진입에 사용할 계좌 비율")
+        print(f"DCA_RESERVE_CASH_RATE - {DCA_RESERVE_CASH_RATE:.2f} - DCA 물타기에 남겨둘 계좌 비율")
+        print(f"DCA_USE_ACCOUNT_CASH - {DCA_USE_ACCOUNT_CASH} - True이면 DCA 추가매수 예산을 실제 주문가능금액 기준으로 계산합니다.")
+        print(f"MAX_REBUY_PER_STOCK - {MAX_REBUY_PER_STOCK} - DCA 추가매수 성공 처리 최대 횟수. 익절 후 재진입은 포함하지 않습니다.")
+        print(f"DCA_NO_BUY_TOUCH_MAX - {DCA_NO_BUY_TOUCH_MAX} - DCA 예산부족 상태에서 현재가 기준 다음 트리거를 하향 이동할 최대 터치 횟수")
+        print(f"FORCE_EXIT_ENABLED - {FORCE_EXIT_ENABLED} / FORCE_EXIT_TIME - {FORCE_EXIT_TIME} - 시간이 되면 전체 청산 후 종료합니다.")
+
+        BaseURL = KIWOOM_URL.strip() or os.getenv("KIWOOM_URL", "https://mockapi.kiwoom.com")
+        app_key = KIWOOM_APP_KEY.strip() or os.getenv("KIWOOM_APP_KEY")
+        app_secret = KIWOOM_APP_SECRET.strip() or os.getenv("KIWOOM_APP_SECRET")
+
+        if not app_key or not app_secret:
+            raise SystemExit("KIWOOM_APP_KEY, KIWOOM_APP_SECRET 값을 코드 상단에 입력하거나 환경변수로 설정하세요.")
+
+        auth = KiwoomAuth(app_key, app_secret, BaseURL)
+        access_token = auth.token() if hasattr(auth, "token") else auth._access_token
+        time.sleep(1)
+
+        raw_client = KiwoomClient(access_token, is_paper=is_paper)
+        client = ThreadSafeKiwoomClient(raw_client)
+        time.sleep(1)
+
+        if args.sell_all:
+            print(f"[{_now()}] --sell-all 옵션이 있어 장시작 대기와 신규 매수를 PASS합니다.")
+            _run_sell_all_mode(client, auto_yes=bool(args.yes))
+            print(f"[{_now()}] 완료")
+            return
+
+        if restore_items:
+            print(f"[{_now()}] 재시작/복구 설정이 있어 장시작 대기와 신규 매수를 PASS합니다.")
+            _run_restore_mode(client, restore_items, auto_yes=restore_auto_yes)
+            print(f"[{_now()}] 완료")
+            return
+
+        if TEST_MODE or b_Test:
+            print(f"[TEST MODE] 장시작 예약시간 {start_time} PASS")
+        else:
+            wait_until(start_time)
+
+        account_snapshot = _get_account_snapshot(client)
+        cur_entr = _safe_int(account_snapshot.get("cur_entr"))
+
+        _print_account_snapshot(account_snapshot)
+
+        order_plans = _make_order_plan(client, cur_entr)
+        _print_order_plan(order_plans, cur_entr)
+
+        if args.yes:
+            print(f"\n[{_now()}] --yes 옵션이 있어 확인 질문 없이 종목별 스레드 주문을 시작합니다.")
+        else:
+            if not _confirm_execution("위 내용으로 최초 50% 진입 매수를 종목별 스레드로 실행하시겠습니까?"):
+                print(f"[{_now()}] 사용자가 실행하지 않음을 선택했습니다. 프로그램을 종료합니다.")
+                return
+            print(f"\n[{_now()}] 사용자가 실행을 승인했습니다. 종목별 워커를 시작합니다.")
+
+        results = _run_stock_threads(client, order_plans)
+
+        print(f"\n[{_now()}] 종목별 워커 종료 후 주문 등록 결과")
+        if not results:
+            print("등록된 주문이 없습니다.")
+        else:
+            for item in results:
+                print(
+                    f"- {item['stk_nm']}[{item['stk_cd']}] "
+                    f"{item['qty']}주 / 매수가 {format(item['buy_avg_price'], ',')}원 / "
+                    f"익절 {item['take_profit_pct']:.1f}% {format(item['take_profit_price'], ',')}원 / "
+                    f"DCA트리거 {item['stop_loss_pct']:.1f}% {format(item['stop_loss_price'], ',')}원 / "
+                    f"매수주문번호 {item['buy_ord_no']} / 익절주문번호 {item['take_profit_ord_no']}"
+                )
+
+        try:
+            cur_entr_after = client.get_current_entr()
+            print(f"[{_now()}] 주문 후 계좌 주문가능금액: {format(_safe_int(cur_entr_after), ',')}원")
+        except Exception as exc:
+            print(f"[{_now()}] 주문 후 계좌 주문가능금액 조회 실패: {exc}")
+
+        _print_trade_report()
+        print(f"[{_now()}] 완료")
+    finally:
+        _close_log_tee()
 
 if __name__ == "__main__":
     main()
